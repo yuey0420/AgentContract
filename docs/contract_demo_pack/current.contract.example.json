@@ -1,0 +1,82 @@
+{
+  "contract_version": "0.1",
+  "id": "demo-contract-001",
+  "owner": "local_user",
+  "objective": "演示 CyberClaw 契约层如何约束文件写入、Shell 执行和动态 Skill 运行",
+  "risk_level": "medium",
+  "status": "approved",
+  "scope": {
+    "can_read": [
+      "reports/**",
+      "demo/**"
+    ],
+    "can_write": [
+      "reports/**",
+      "demo/**"
+    ],
+    "cannot_write": [
+      "skills/**",
+      ".env",
+      "**/*.key",
+      "**/*.pem"
+    ],
+    "can_execute": [
+      "python",
+      "pytest",
+      "dir",
+      "ls",
+      "echo"
+    ],
+    "cannot_execute": [
+      "rm -rf",
+      "del /s",
+      "format",
+      "git push",
+      "curl",
+      "wget",
+      "powershell Invoke-WebRequest"
+    ]
+  },
+  "limits": {
+    "max_tool_calls": 20,
+    "max_shell_seconds": 60,
+    "max_written_files": 5,
+    "max_file_bytes": 200000
+  },
+  "tool_policy": {
+    "allowed_tools": [
+      "list_office_files",
+      "read_office_file",
+      "write_office_file",
+      "execute_office_shell"
+    ],
+    "blocked_tools": [
+      "save_user_profile"
+    ],
+    "high_risk_tools": [
+      "write_office_file",
+      "execute_office_shell"
+    ],
+    "require_confirmation_for": []
+  },
+  "acceptance": [
+    {
+      "type": "no_contract_violation"
+    },
+    {
+      "type": "file_exists",
+      "path": "reports/summary.md"
+    },
+    {
+      "type": "tool_called",
+      "tool": "write_office_file"
+    }
+  ],
+  "approval": {
+    "mode": "confirm_once",
+    "approved_by": "local_user",
+    "approved_at": "2026-06-04T00:00:00Z",
+    "contract_hash": "sha256:demo-placeholder"
+  }
+}
+

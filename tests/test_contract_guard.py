@@ -1,0 +1,80 @@
+import os
+import sys
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from cyberclaw.core.contracts.guard import guard_tool_call
+from cyberclaw.core.contracts.models import TaskContract
+
+
+def make_contract(status="approved"):
+    return TaskContract.model_validate({
+        "contract_version": "0.1",
+        "id": "contract-guard",
+        "owner": "local_user",
+        "objective": "测试守卫",
+        "risk_level": "high",
+        "status": status,
+        "scope": {
+            "can_write": ["reports/**"],
+            "cannot_write": ["skills/**"],
+            "can_execute": ["python"],
+            "cannot_execute": ["rm -rf"],
+        },
+        "tool_policy": {
+            "allowed_tools": ["write_office_file", "execute_office_shell"],
+            "blocked_tools": [],
+            "require_confirmation_for": [],
+        },
+    })
+
+
+class TestContractGuard(unittest.TestCase):
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None)
+    def test_no_active_contract_allows_compatibility(self, _mock_load, mock_log):
+        decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "anything.txt"})
+        self.assertEqual(decision.decision, "allow")
+        self.assertIsNone(decision.contract_id)
+        mock_log.assert_called()
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract(status="draft"))
+    def test_draft_contract_denies(self, _mock_load, mock_log):
+        decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "reports/a.md"})
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.clause, "contract.status")
+        self.assertTrue(any(call.kwargs.get("event") == "contract_violation" for call in mock_log.call_args_list))
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    def test_write_allowed_path(self, _mock_load, _mock_log):
+        decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "reports/a.md"})
+        self.assertEqual(decision.decision, "allow")
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    def test_write_blocked_path(self, _mock_load, mock_log):
+        decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "skills/a.py"})
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.clause, "scope.cannot_write")
+        self.assertTrue(any(call.kwargs.get("event") == "contract_violation" for call in mock_log.call_args_list))
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    def test_shell_allowed_command(self, _mock_load, _mock_log):
+        decision = guard_tool_call("test-thread", "execute_office_shell", {"command": "python script.py"})
+        self.assertEqual(decision.decision, "allow")
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    def test_shell_blocked_command(self, _mock_load, _mock_log):
+        decision = guard_tool_call("test-thread", "execute_office_shell", {"command": "rm -rf tmp"})
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.clause, "scope.cannot_execute")
+
+
+if __name__ == "__main__":
+    unittest.main()
