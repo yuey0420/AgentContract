@@ -11,7 +11,7 @@ cyberclaw_tool = tool
 # 类模式工具（适合复杂场景）
 class CyberClawBaseTool(BaseTool, ABC):
     """
-    CyberClaw 的标准工具基类。
+    PactFlow 的标准工具基类。类名保留用于向后兼容。
     如果你的工具需要复杂的初始化逻辑（比如维持一个数据库长连接），
     或者需要保存内部状态，请继承此类并实现 `_run` 方法。
     """

@@ -10,7 +10,7 @@ def parse_requirements(filename):
         ]
 
 setup(
-    name="cyberclaw",
+    name="pactflow",
     version="1.0.0",
     description="Contract-governed transparent Agent runtime",
     packages=find_packages(),
@@ -18,6 +18,7 @@ setup(
     install_requires=parse_requirements('requirements.txt'),
     entry_points={
         "console_scripts": [
+            "pactflow=entry.cli:main",
             "cyberclaw=entry.cli:main",
         ],
     },

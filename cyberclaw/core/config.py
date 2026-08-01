@@ -12,6 +12,7 @@ WORKSPACE_DIR = os.getenv("CYBERCLAW_WORKSPACE", os.path.join(PROJECT_ROOT, "wor
 # 如果环境变量不存在，则默认在项目根目录下创建 workspace 文件夹。
 
 DB_PATH = os.path.join(WORKSPACE_DIR, "state.sqlite3")     # 状态机：潜意识与短期记忆
+RUNTIME_DB_PATH = os.path.join(WORKSPACE_DIR, "runtime.sqlite3")
 MEMORY_DIR = os.path.join(WORKSPACE_DIR, "memory")         # 显性记忆：Markdown 画像
 PERSONAS_DIR = os.path.join(WORKSPACE_DIR, "personas")     # 人设区：系统 Prompt
 SCRIPTS_DIR = os.path.join(WORKSPACE_DIR, "scripts")       # 脚本区：自动化武器库
@@ -26,6 +27,7 @@ CONTRACT_ARCHIVE_DIR = os.path.join(CONTRACTS_DIR, "archive")
 CONTRACT_REPORTS_DIR = os.path.join(CONTRACTS_DIR, "reports")
 CONTRACT_TEMPLATES_DIR = os.path.join(CONTRACTS_DIR, "templates")
 ACTIVE_CONTRACT_FILE = os.path.join(CONTRACT_ACTIVE_DIR, "current.contract.json")
+STRICT_CONTRACTS = os.getenv("CYBERCLAW_STRICT_CONTRACTS", "false").lower() in {"1", "true", "yes", "on"}
 
 for d in [
     WORKSPACE_DIR,

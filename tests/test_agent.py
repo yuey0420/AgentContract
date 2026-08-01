@@ -24,9 +24,9 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(initial_state["summary"], "")
 # assertEqual是unittest 框架提供的断言方法 检查 initial_state 这个对象的两个字段是否等于预期的值
 
-    @patch('cyberclaw.core.provider.get_provider') # 替换 get_provider 函数为 Mock 对象
-    @patch('cyberclaw.core.skill_loader.load_dynamic_skills') # 替换 load_dynamic_skills 函数为 Mock 对象
-    @patch('cyberclaw.core.tools.builtins.BUILTIN_TOOLS', []) # 将内置工具列表替换为空列表
+    @patch('cyberclaw.core.agent.get_provider') # 替换 Agent 实际引用的 get_provider
+    @patch('cyberclaw.core.agent.load_dynamic_skills') # 替换 Agent 实际引用的技能加载器
+    @patch('cyberclaw.core.agent.BUILTIN_TOOLS', []) # 将 Agent 已导入的工具列表替换为空
 # 为什么要 Mock？
 # 避免真实 API 调用：测试时不应该真的调用 OpenAI 或其他 API
 # 隔离环境：不依赖网络、数据库、文件系统
@@ -53,9 +53,9 @@ class TestAgent(unittest.TestCase):
             print(f"Unexpected error: {e}")
             raise
 
-    @patch('cyberclaw.core.provider.get_provider')
-    @patch('cyberclaw.core.skill_loader.load_dynamic_skills')
-    @patch('cyberclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('cyberclaw.core.agent.get_provider')
+    @patch('cyberclaw.core.agent.load_dynamic_skills')
+    @patch('cyberclaw.core.agent.BUILTIN_TOOLS', [])
     def test_create_agent_app_with_custom_tools(self, mock_load_skills, mock_get_provider):
         """测试创建带有自定义工具的代理应用（带 Mock）"""
         from cyberclaw.core.agent import create_agent_app
@@ -86,9 +86,9 @@ class TestAgent(unittest.TestCase):
             print(f"Unexpected error: {e}")
             raise
 
-    @patch('cyberclaw.core.provider.get_provider')
-    @patch('cyberclaw.core.skill_loader.load_dynamic_skills')
-    @patch('cyberclaw.core.tools.builtins.BUILTIN_TOOLS', [])
+    @patch('cyberclaw.core.agent.get_provider')
+    @patch('cyberclaw.core.agent.load_dynamic_skills')
+    @patch('cyberclaw.core.agent.BUILTIN_TOOLS', [])
     # 验证 Agent 可以正确集成检查点（状态持久化）
     def test_create_agent_app_with_checkpointer(self, mock_load_skills, mock_get_provider):
         """测试创建带有检查点的代理应用（带 Mock）"""
@@ -114,6 +114,33 @@ class TestAgent(unittest.TestCase):
         except Exception as e:
             print(f"Unexpected error: {e}")
             raise
+
+    @patch('cyberclaw.core.agent.process_manager')
+    @patch('cyberclaw.core.agent.get_provider')
+    def test_graph_runs_prepare_and_verify(self, mock_get_provider, mock_process_manager):
+        from cyberclaw.core.agent import create_agent_app
+
+        bound_model = Mock()
+        bound_model.invoke.return_value = AIMessage(content="done")
+        provider = Mock()
+        provider.bind_tools.return_value = bound_model
+        mock_get_provider.return_value = provider
+        mock_process_manager.start.return_value = {
+            "run_id": "run-1",
+            "execution_mode": "chat",
+            "process_phase": "execute",
+        }
+        mock_process_manager.finalize.return_value = {"status": "passed"}
+
+        app = create_agent_app(tools=[])
+        result = app.invoke(
+            {"messages": [HumanMessage(content="hello")], "summary": ""},
+            config={"configurable": {"thread_id": "thread-1"}},
+        )
+
+        mock_process_manager.start.assert_called_once_with("thread-1", "hello")
+        mock_process_manager.finalize.assert_called_once_with("run-1", "thread-1")
+        self.assertEqual(result["process_report"]["status"], "passed")
 
 
 if __name__ == '__main__':

@@ -27,7 +27,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_FILE = os.path.join(PROJECT_ROOT, "logs", "local_geek_master.jsonl")
 
 def print_header():
-    """渲染 简约斜体版·CyberClaw 监控面板"""
+    """渲染 PactFlow 监控面板。"""
     
     monster = (
         "  ▄█▄▄█▄  \n"
@@ -40,11 +40,11 @@ def print_header():
     content = Text(justify="center")
     content.append("\n  Live Stream  \n\n", style="bold white italic")
     content.append(monster + "\n\n", style="color(141)")
-    content.append("   What is CyberClaw doing?    \n", style="dim white italic") 
+    content.append("   What is PactFlow doing?    \n", style="dim white italic")
 
     panel = Panel(
         Align.center(content),  
-        title="[bold color(141)] CyberClaw [/bold color(141)]",
+        title="[bold color(141)] PactFlow [/bold color(141)]",
         title_align="left",
         border_style="color(141)",
         box=box.ROUNDED,
@@ -100,6 +100,8 @@ def render_event(line: str):
         elif event == "tool_result":
             tool_name = data.get("tool", "unknown")
             result = data.get("result_summary", "")
+            if not isinstance(result, str):
+                result = json.dumps(result, ensure_ascii=False, indent=2)
             display_result = result[:300] + "\n...[截断]..." if len(result) > 300 else result
             content = f"[bold white] ● 执行结果: [/bold white][bold cyan]{tool_name}[/bold cyan]\n{display_result}"
             console.print(Panel(content, title=f"✦ 环境回传 [ {ts} ]", title_align="left", border_style="cyan", width=60))

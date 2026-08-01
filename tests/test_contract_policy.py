@@ -5,7 +5,12 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from cyberclaw.core.contracts.models import TaskContract
-from cyberclaw.core.contracts.policy import check_shell_command, check_tool_allowed, check_write_path
+from cyberclaw.core.contracts.policy import (
+    check_resource_boundary,
+    check_shell_command,
+    check_tool_allowed,
+    check_write_path,
+)
 
 
 def make_contract():
@@ -66,6 +71,20 @@ class TestContractPolicy(unittest.TestCase):
         decision = check_shell_command(make_contract(), "node build.js")
         self.assertEqual(decision.decision, "deny")
         self.assertEqual(decision.clause, "scope.can_execute")
+
+    def test_forbidden_boundary_denies(self):
+        contract = make_contract()
+        contract.scope.forbidden = ["framework/**"]
+        decision = check_resource_boundary(contract, "framework/core.py")
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.clause, "scope.forbidden")
+
+    def test_human_boundary_requires_confirmation(self):
+        contract = make_contract()
+        contract.scope.human_only = ["models/**"]
+        decision = check_resource_boundary(contract, "models/User.py")
+        self.assertEqual(decision.decision, "require_confirmation")
+        self.assertEqual(decision.clause, "scope.human_only")
 
 
 if __name__ == "__main__":

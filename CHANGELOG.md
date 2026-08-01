@@ -1,6 +1,22 @@
-# CyberClaw 变更日志
+# PactFlow 变更日志
 
 ## [Unreleased]
+
+### 流程与安全升级
+
+- 所有 Agent 工具统一接入 `ContractToolNode`
+- LangGraph 增加 prepare / verify / finalize 流程节点和三种执行模式
+- 高风险工具调用支持 CLI 内联 Y/N 审批，不再要求用户手输动作编号
+- 使用 checkpoint 精确暂停和恢复原始 `tool_call_id` 与参数，不重新请求模型
+- 审批状态支持批准、拒绝、超时和一次性消费，并写入运行账本与审计日志
+- 支持退出后重新启动并恢复未完成审批
+- 定时任务、契约批准、运行记录和证据迁移至 `runtime.sqlite3`
+- 契约批准 hash 与 SQLite registry 双重校验
+- 支持一次性高风险动作批准和四级资源边界
+- 修复 office 路径前缀逃逸，Shell 改为无 Shell 解析和敏感环境清理
+- 审计日志增加递归脱敏，长期记忆降为低信任上下文数据
+- 计算器使用 AST 白名单替代 `eval`
+- 真实模型验收脚本覆盖批准、拒绝和契约越权三条路径
 
 ### 新增
 

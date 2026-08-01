@@ -3,7 +3,45 @@ import json
 import threading
 import queue
 import atexit
+import hashlib
+import re
 from datetime import datetime, timezone
+
+
+_SENSITIVE_KEY = re.compile(
+    r"(?:api[_-]?key|token|secret|password|credential|authorization|cookie)",
+    re.IGNORECASE,
+)
+_CONTENT_KEYS = {"content", "new_content", "file_content", "result_summary"}
+
+
+def _content_fingerprint(value: str) -> dict[str, object]:
+    encoded = value.encode("utf-8", errors="replace")
+    return {
+        "redacted": True,
+        "length": len(value),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def sanitize_log_value(value, key: str | None = None):
+    """Remove credentials and large user-controlled payloads before persistence."""
+    if key and _SENSITIVE_KEY.search(key):
+        return "[REDACTED]"
+    if key in _CONTENT_KEYS and isinstance(value, str):
+        return _content_fingerprint(value)
+    if isinstance(value, dict):
+        return {str(k): sanitize_log_value(v, str(k)) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_log_value(item) for item in value]
+    if isinstance(value, str) and len(value) > 2000:
+        return {
+            "truncated": True,
+            "preview": value[:500],
+            "length": len(value),
+            "sha256": hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest(),
+        }
+    return value
 
 # 内存队列 + 守护线程
 class JSONLEventLogger:
@@ -23,7 +61,8 @@ class JSONLEventLogger:
         os.makedirs(self.log_dir, exist_ok=True)
 
         # 无界内存队列，用于缓冲日志事件
-        self.log_queue = queue.Queue()
+        self.log_queue = queue.Queue(maxsize=10000)
+        self._shutdown = False
 
         self.worker_thread = threading.Thread(target=self._write_loop, daemon=True)
         self.worker_thread.start()
@@ -60,13 +99,21 @@ class JSONLEventLogger:
             "ts": now_utc,
             "thread_id": thread_id,
             "event": event,
-            **kwargs
+            **sanitize_log_value(kwargs),
         }
 
-        self.log_queue.put(log_item)
+        if not self._shutdown:
+            self.log_queue.put(log_item, timeout=5)
+
+    def flush(self):
+        self.log_queue.join()
 
     def shutdown(self):
+        if self._shutdown:
+            return
+        self._shutdown = True
         self.log_queue.put(None)
         self.log_queue.join()
+        self.worker_thread.join(timeout=5)
 
 audit_logger = JSONLEventLogger()

@@ -1,8 +1,8 @@
 <div align="center">
 
-![CyberClaw Logo](docs/cyber_logo.png)
+![PactFlow Logo](docs/brand/pactflow-wordmark.svg)
 
-# CyberClaw
+# PactFlow
 
 ###  **当 AI 开始"黑箱操作"，你需要一双透视眼**
 
@@ -10,7 +10,7 @@
 
 核心创新：把 Agent 的高风险工具调用从“提示词约束”升级为“结构化契约校验”，让执行前有边界、执行中可拦截、执行后可验收。
 
-Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 74 项通过
+Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 99 项通过
 
 [快速开始](#-快速开始) · [核心能力](#-核心能力) · [契约层-demo](#-契约层-demo) · [架构图](#-系统架构)
 
@@ -18,25 +18,25 @@ Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 74 �
 
 ---
 
-> 🤖 **你的 AI 在背着你做什么？CyberClaw 让所有行为无所遁形**
+> 🤖 **你的 AI 在背着你做什么？PactFlow 让所有行为无所遁形**
 > 
-> 💡 **灵感来源**：受 [OpenClaw](https://github.com/openclaw/openclaw) 的启发，CyberClaw 专注于解决 AI 智能体的透明度和可控性问题。
+> 💡 **灵感来源**：受 [OpenClaw](https://github.com/openclaw/openclaw) 的启发，PactFlow 专注于解决 AI 智能体的透明度和可控性问题。
 
 ---
 
 ## 📖 简介
 
-CyberClaw 是一个**契约约束下的透明可控 Agent Runtime**，重新定义 AI 系统的可信边界：
+PactFlow 是一个**契约约束下的透明可控 Agent Runtime**，重新定义 AI 系统的可信边界：
 
 - **🔍 白盒化决策** → 5 类事件审计 + JSONL 日志 + Rich 监控终端，所有行为可追溯
 - **📜 契约层治理** → Contract Schema + Tool Guard + Policy Decision + Acceptance Report，让高风险工具调用按条款执行
-- **🛡️ 零信任执行** → 两段式调用（help → run），先看说明书再执行，本地对照实验中 P0 级事故率降低 80%
+- **🛡️ 受控执行** → 统一工具网关 + 两段式 Skill + 一次性人工批准，高风险动作不再依赖提示词自觉
 - **🧠 持续学习** → 双水位记忆系统（长期画像 + 短期摘要），越用越懂你
-- **⚡ 复杂任务编排** → 心跳任务系统 + 可插拔技能 + MCP 服务集成，解放双手
+- **⚡ 任务流程编排** → prepare → execute → verify 生命周期、运行账本和自动验收报告
 
 ### 🔌 技能生态兼容
 
-CyberClaw 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenClaw / Claude Code 风格技能，并通过 help → run 两段式机制降低未知技能的执行风险。
+PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenClaw / Claude Code 风格技能，并通过 help → run 两段式机制降低未知技能的执行风险。
 
 ### 🌟 核心能力
 
@@ -45,8 +45,8 @@ CyberClaw 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCl
 | **📜 契约层治理** | JSON 契约 + Pydantic Schema + 工具调用守卫 + 验收报告 | 执行前可约束，执行后可审计 |
 | **🧠 双水位记忆** | 长期画像 + 短期摘要，持续学习用户偏好 | 越用越懂你，避免重复询问 |
 | **🔍 全行为审计** | 5 类事件实时审计，JSONL 日志 + Rich 监控终端 | 告别黑箱，所有决策可追溯 |
-| **🛡️ 零信任执行** | help → run 两段式调用，先看说明书再执行 | 本地对照实验中 P0 级事故率降低 80%（50% → 10%）|
-| **⏰ 心跳任务引擎** | 后台独立进程，自动执行定时任务 | 解放双手，复杂任务自动化 |
+| **🛡️ 受控执行** | 统一 `ContractToolNode`、受限子进程、一次性批准 | 所有 Agent 可见工具使用同一策略入口 |
+| **⏰ 心跳任务引擎** | 运行期间自动触发，SQLite 事务持久化 | 重启不丢任务，过期循环任务不会连续轰炸 |
 | **🖥️ 跨平台支持** | Unix + Windows 双平台自适应，LLM 自主选择命令 | 一套代码，全平台运行 |
 
 ---
@@ -72,21 +72,33 @@ CyberClaw 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCl
   - Rich 终端 UI，颜色/面板区分事件类型
 
 - **心跳任务系统**
-  - 后台独立进程，每秒检查任务队列
-  - 支持 daily/weekly/monthly 循环任务
-  - 任务持久化存储，重启不丢失
+  - `pactflow run` 运行期间检查到期任务
+  - 支持 hourly/daily/weekly 循环任务
+  - 任务保存在 `runtime.sqlite3`，事务更新并兼容迁移旧 `tasks.json`
 
 ### 📜 契约层治理
 
 - **Contract as Runtime Policy**
   - active contract 存放在 `workspace/contracts/active/current.contract.json`
   - 使用 JSON + Pydantic 定义任务目标、权限范围、工具策略和验收规则
-  - 无 active contract 时保持兼容模式；启用契约后，高风险工具进入契约校验
+  - 支持 `chat`、`guarded_action`、`managed_task` 三种执行模式
+  - Shell、动态 Skill、记忆覆盖和删除/修改操作在无契约时要求一次性批准
 
 - **Tool Guard 工具调用守卫**
-  - 覆盖 `write_office_file`、`execute_office_shell`、动态 Skill 的 `mode='run'`
-  - 支持 `can_write` / `cannot_write`、`can_execute` / `cannot_execute`
+  - 所有内置工具、自定义工具和动态 Skill 统一经过 `ContractToolNode`
+  - 支持 `can_read` / `can_write` / `cannot_write` / `can_execute` / `cannot_execute`
+  - 支持 autonomous / review_required / human_only / forbidden 四级资源边界
   - 支持 `allowed_tools` / `blocked_tools`，把工具调用从“模型自觉”升级为运行时校验
+
+- **流程生命周期**
+  - 每次请求创建独立 `run_id`，证据不会跨轮次混用
+  - LangGraph 主路径为 `prepare → agent/tools → verify → finalize`
+  - 高风险调用使用 LangGraph checkpoint 原地暂停，CLI 直接展示工具、脱敏参数、风险和契约条款并收集 Y/N
+  - 批准后恢复同一个 `tool_call_id` 和原始参数，不要求 LLM 重新生成调用
+  - 审批支持批准、拒绝、超时和事务性一次消费，所有状态变化写入审计账本
+  - SQLite checkpoint 支持退出后重新启动并恢复未完成审批
+  - 工具次数、写入资源数、单文件字节数和 Shell 超时限制可执行
+  - 结束时自动生成绑定 `run_id + contract_hash` 的验收报告
 
 - **Acceptance Report 验收报告**
   - 根据契约和 JSONL 日志生成验收结果
@@ -135,7 +147,7 @@ CyberClaw 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCl
 - **SKILL.md 规范**：每个技能包含完整说明书
 - **兼容 SKILL.md 风格技能**：可复用部分 OpenClaw / Claude Code 风格技能，并在 `mode='run'` 时进入契约校验
 - **推荐技能**：
-  - `skill-creator`：用自然语言让 CyberClaw 自己创建技能
+  - `skill-creator`：用自然语言让 PactFlow 自己创建技能
   - `skill-vetter`：检查技能的安全性
   - `mcporter`：连接外部 MCP (Model Context Protocol) 服务
   - `mcp-builder`：构建自己的 MCP 服务
@@ -167,7 +179,7 @@ pip install -e .
 > pip install -e .
 > ```
 > 
-> 安装完成后，即可在任意目录使用 `cyberclaw` 命令。
+> 安装完成后，即可在任意目录使用 `pactflow` 命令。旧命令 `cyberclaw` 作为兼容入口继续保留。
 
 ### 2️⃣ 配置
 
@@ -177,7 +189,7 @@ pip install -e .
 
 ```bash
 # 启动交互式配置向导
-cyberclaw config
+pactflow config
 ```
 
 配置向导会引导你：
@@ -224,13 +236,13 @@ OPENAI_API_KEY=sk-your-api-key-here
 
 > 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `CYBERCLAW_WORKSPACE` 环境变量。
 
-> 💡 提示：配置完成后，可运行 `cyberclaw run` 聊天测试连接是否正常。
+> 💡 提示：配置完成后，可运行 `pactflow run` 聊天测试连接是否正常。
 
 ### 3️⃣ 运行
 
 ```bash
 # 启动主程序
-cyberclaw run
+pactflow run
 ```
 
 ![欢迎界面](docs/welcome.png)
@@ -255,16 +267,17 @@ cyberclaw run
 | 📖 读取文件 | `读取 readme.txt` | 读取文件内容 |
 | 📝 创建文件 | `创建 test.py` | 写入新文件 |
 | 💻 Shell 命令 | `运行 python test.py` | 执行 Shell 命令 |
+| ✅ 批准操作 | 审批面板出现后输入 `Y` / `N` | 批准或拒绝当前暂停的精确工具调用 |
 | 🚪 退出 | `/exit` | 退出程序 |
 
 ### ⏰ 心跳任务系统
 
-CyberClaw 内置心跳任务系统（Heartbeat），自动在后台执行定时任务：
+PactFlow 内置心跳任务系统（Heartbeat），自动在后台执行定时任务：
 
-- **自动触发**：心跳进程每秒检查任务队列，到点自动触发
-- **循环任务**：支持 daily/weekly/monthly 循环模式
-- **任务持久化**：任务保存在 `workspace/tasks.json`，重启不丢失
-- **实时监控**：运行 `cyberclaw monitor` 可查看任务执行日志
+- **自动触发**：`pactflow run` 运行期间检查任务队列，到点触发
+- **循环任务**：支持 hourly/daily/weekly 循环模式
+- **任务持久化**：任务保存在 `workspace/runtime.sqlite3`，重启不丢失
+- **实时监控**：运行 `pactflow monitor` 可查看任务执行日志
 
 **心跳任务示例：**
 ```bash
@@ -275,13 +288,13 @@ CyberClaw 内置心跳任务系统（Heartbeat），自动在后台执行定时�
 # 心跳系统会在每天 8:00 自动触发提醒
 ```
 
-> 💡 提示：心跳任务在后台运行，即使不启动主程序也会执行（需单独运行心跳进程）。
+> 当前版本没有独立通知守护进程；PactFlow 未运行期间任务仍会持久化，并在下次运行时处理到期任务。
 
 ### 5️⃣ 监控终端
 
 在另一个终端运行：
 ```bash
-cyberclaw monitor
+pactflow monitor
 ```
 
 ![监控终端](docs/monitor.png)
@@ -290,7 +303,44 @@ cyberclaw monitor
 
 ## 📜 契约层 Demo
 
-CyberClaw 已内置契约层 MVP，可以演示“允许的动作继续执行，越界的动作被契约拒绝并写入审计日志”。
+PactFlow 已内置契约执行层，可以演示“低风险动作按契约执行，高风险动作原地暂停，批准后精确恢复，越界动作直接拒绝，最终结果自动验收”。
+
+### 面试主流程
+
+```mermaid
+flowchart LR
+    U["用户任务"] --> C["契约校验"]
+    C -->|"允许"| E["执行工具"]
+    C -->|"越权"| D["拒绝并审计"]
+    C -->|"高风险"| P["Checkpoint 暂停"]
+    P --> H["CLI 显示工具、参数、风险、条款"]
+    H -->|"Y"| R["消费一次性批准"]
+    H -->|"N / 超时"| D
+    R --> E
+    E --> V["自动验收"]
+    D --> V
+    V --> A["可审计报告"]
+```
+
+精确恢复的关键是职责分离：LangGraph checkpoint 保存原始 `tool_call_id` 和参数；SQLite 审批账本只保存脱敏参数、调用指纹和审批状态。用户批准后，`ContractToolNode` 校验并事务性消费这条批准，直接执行检查点中的原调用，因此恢复前不会再请求模型，也不会出现模型改写参数的问题。
+
+### 2 分钟演示
+
+1. 运行 `pactflow run`，要求 Agent 在 `reports/` 写入文件，展示普通契约动作正常完成。
+2. 要求 Agent 执行契约中需要确认的 Shell 命令。CLI 会直接显示工具、参数、风险、条款和有效期。
+3. 输入 `Y`。说明系统恢复的是同一条已暂停调用，不是让模型重新思考；随后展示工具结果和 `passed` 报告。
+4. 再触发一次高风险命令并输入 `N`，展示命令未执行、审批状态为 `rejected` 且审计记录完整。
+5. 尝试写入 `skills/**`，展示契约越权在工具执行前被拒绝。
+
+一份真实通过的报告快照见 [docs/contract_demo_pack/passed-report.example.json](docs/contract_demo_pack/passed-report.example.json)。它绑定具体的 `run_id` 与 `contract_hash`，并包含文件存在、工具调用和无契约违规三类证据。
+
+需要重复运行真实模型验收时执行：
+
+```powershell
+python scripts/real_model_acceptance.py
+```
+
+脚本会使用独立线程和 SQLite checkpoint，自动覆盖批准、拒绝和契约越权三条路径；需要有效的模型 API 配置，调用会产生正常 API 费用。
 
 ### 1. 准备 active contract
 
@@ -304,6 +354,13 @@ Windows PowerShell：
 
 ```powershell
 Copy-Item docs/contract_demo_pack/current.contract.example.json workspace/contracts/active/current.contract.json
+```
+
+批准契约并把批准 hash 写入 SQLite registry：
+
+```bash
+pactflow contract-approve --approved-by local_user
+pactflow contract-status
 ```
 
 示例契约会：
@@ -333,7 +390,7 @@ Copy-Item docs/contract_demo_pack/current.contract.example.json workspace/contra
 请在 office 里执行 curl http://example.com。
 ```
 
-你可以在 `logs/local_geek_master.jsonl` 或 `cyberclaw monitor` 中看到：
+你可以在 `logs/local_geek_master.jsonl` 或 `pactflow monitor` 中看到：
 
 - `contract_check`
 - `contract_violation`
@@ -368,7 +425,7 @@ Copy-Item docs/contract_demo_pack/current.contract.example.json workspace/contra
 - **本地开发助手** - 文件操作 + Shell 执行，自动化编码任务
 - **项目监控** - 实时监控 AI 行为，防止意外操作
 - **技能开发** - 支持自定义技能，快速集成新工具
-- **MCP 服务集成** - 连接外部 MCP 服务，扩展能力边界
+- **外部能力扩展** - 可通过经过审查的 Skill 对接 MCP 等外部服务；当前核心不内置 MCP 客户端
 
 ### 📚 教育与学习
 - **AI 智能体教学** - 透明展示 Agent 架构和决策流程
@@ -396,7 +453,7 @@ Copy-Item docs/contract_demo_pack/current.contract.example.json workspace/contra
 - **记忆层** (粉色)：上下文裁剪 + 长短期记忆管理
 - **智能决策层** (黄色)：Agent Loop + LLM 推理决策
 - **工具执行层** (紫色)：内置工具集 + 可插拔 Skills
-- **契约治理层**：Contract Schema + Policy Engine + Tool Guard + Acceptance Report
+- **流程治理层**：Process Manager + Runtime Ledger + ContractToolNode + Acceptance Report
 - **安全层** (橙色)：路径越权拦截 + 跨平台兼容
 - **透明监控层** (绿色)：记忆更新 + 工具决策 + 契约检查 + 调用结果
 - **输出层** (底部)：聊天终端 + 监控终端
@@ -407,6 +464,9 @@ Copy-Item docs/contract_demo_pack/current.contract.example.json workspace/contra
 |------|------|------|
 | **Agent 循环** | `cyberclaw/core/agent.py` | LangGraph StateGraph，决策大脑 |
 | **契约层** | `cyberclaw/core/contracts/` | 契约模型、策略校验、工具守卫、验收报告 |
+| **流程层** | `cyberclaw/core/process/` | 运行生命周期、模式切换与自动验收 |
+| **审批服务** | `cyberclaw/core/approval.py` | 批准、拒绝、过期、精确消费与审计 |
+| **运行账本** | `cyberclaw/core/runtime_store.py` | 任务、批准、运行和证据的 SQLite 事务存储 |
 | **技能加载** | `cyberclaw/core/skill_loader.py` | 动态加载 SKILL.md，两段式调用 |
 | **上下文管理** | `cyberclaw/core/context.py` | 消息修剪，双水位记忆 |
 | **内置工具** | `cyberclaw/core/tools/builtins.py` | 时间/计算/任务调度等 |
@@ -417,7 +477,7 @@ Copy-Item docs/contract_demo_pack/current.contract.example.json workspace/contra
 ### 项目结构
 
 ```
-CyberClaw/
+PactFlow/
 ├── cyberclaw/                    # 核心包
 │   ├── core/
 │   │   ├── agent.py              # Agent 循环
@@ -427,10 +487,14 @@ CyberClaw/
 │   │   ├── skill_loader.py       # 动态技能加载
 │   │   ├── logger.py             # 审计日志
 │   │   ├── heartbeat.py          # 心跳任务
+│   │   ├── runtime_store.py      # SQLite 运行账本
+│   │   ├── approval.py           # 审批状态机与精确消费
+│   │   ├── process/              # 流程生命周期
 │   │   ├── contracts/            # 契约层
 │   │   │   ├── models.py         # 契约 Schema
 │   │   │   ├── policy.py         # 权限策略校验
 │   │   │   ├── guard.py          # 工具调用守卫
+│   │   │   ├── tool_node.py      # 统一工具执行网关
 │   │   │   ├── store.py          # 契约读写
 │   │   │   └── report.py         # 验收报告
 │   │   └── tools/
@@ -443,7 +507,7 @@ CyberClaw/
 │   ├── memory/                   # 用户长期画像等运行时记忆
 │   ├── contracts/                # active contract、验收报告等运行时契约数据
 │   ├── state.sqlite3             # 对话历史数据库（运行时生成）
-│   └── tasks.json                # 定时任务队列（运行时生成）
+│   └── runtime.sqlite3           # 任务、批准、运行与证据账本
 ├── logs/                         # 运行时审计日志，默认不提交到 Git
 │   └── local_geek_master.jsonl   # JSONL 审计日志（运行时生成）
 ├── docs/                         # 文档与架构图
@@ -459,6 +523,8 @@ CyberClaw/
 │   ├── main.py                   # 主程序入口
 │   ├── cli.py                    # CLI 配置向导
 │   └── monitor.py                # 监控终端
+├── scripts/
+│   └── real_model_acceptance.py  # 真实模型三场景验收脚本
 ├── tests/                        # 测试套件
 │   ├── test_agent.py
 │   ├── test_builtins.py
@@ -501,7 +567,7 @@ cp -r /path/to/skill workspace/office/skills/
 cd workspace/office/skills
 cp -r /path/to/skill-creator .
 
-# 然后用自然语言让 CyberClaw 创建新技能
+# 然后用自然语言让 PactFlow 创建新技能
 > 帮我创建一个查询比特币价格的技能
 ```
 
@@ -511,7 +577,7 @@ cp -r /path/to/skill-creator .
 cd workspace/office/skills
 cp -r /path/to/skill-vetter .
 
-# 让 CyberClaw 检查技能安全性
+# 让 PactFlow 检查技能安全性
 > 帮我检查一下 weather 技能是否安全
 ```
 
@@ -566,7 +632,7 @@ curl "wttr.in/Beijing?format=3"
 
 在另一个终端运行：
 ```bash
-cyberclaw monitor
+pactflow monitor
 ```
 
 实时查看：
@@ -667,17 +733,22 @@ python tests/test_two_phase_skills.py
 | `test_contract_guard.py` | 契约守卫 allow/deny 逻辑 | ✅ 通过 |
 | `test_contract_report.py` | 契约验收报告生成 | ✅ 通过 |
 | `test_contract_skill_loader.py` | 动态 Skill help/run 契约约束 | ✅ 通过 |
+| `test_contract_tool_node.py` | 统一工具网关、限制与一次性批准 | ✅ 通过 |
+| `test_runtime_store.py` | SQLite 运行、批准和证据账本 | ✅ 通过 |
+| `test_process_manager.py` | 三种模式和自动验收生命周期 | ✅ 通过 |
+| `test_logger.py` | 审计日志递归脱敏 | ✅ 通过 |
+| `test_e2e_process_flow.py` | 完整流程、真实工具节点、审批和重启恢复 | ✅ 通过 |
 
 ### 回归测试结果
 
-当前契约层 MVP 接入后，本地完整回归测试通过：
+当前安全、契约、流程与运行存储接入后，本地完整回归测试通过：
 
 ```text
-Ran 74 tests in 0.458s
+Ran 99 tests
 OK
 ```
 
-这表示契约层新增后没有破坏现有核心行为，同时新增的契约模型、策略、守卫、报告和 Skill 约束均有自动化测试覆盖。
+测试覆盖路径逃逸、敏感环境清理、批准哈希、统一工具网关、一次性审批、运行级验收和 SQLite 任务恢复。
 
 ### 两阶段测试报告
 

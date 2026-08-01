@@ -1,8 +1,11 @@
 import os
+import shlex
+import shutil
 import subprocess
+from pathlib import Path
 from .base import cyberclaw_tool
 from ..config import OFFICE_DIR
-from ..contracts.guard import format_contract_denial, guard_tool_call
+from ..execution import current_execution
 import re
 import platform
 
@@ -14,15 +17,85 @@ def _get_safe_path(relative_path: str) -> str:
     如果模型尝试传入 "../../etc/passwd"，这里会直接把它拦截。
     """
     # 将 OFFICE_DIR 转化为标准绝对路径
-    base_dir = os.path.abspath(OFFICE_DIR)
-    # 将目标路径转化为绝对路径
-    target_path = os.path.abspath(os.path.join(base_dir, relative_path))
-    
-    # 核心防御：目标路径必须以 OFFICE_DIR 开头！
-    if not target_path.startswith(base_dir):
+    base_dir = Path(OFFICE_DIR).resolve(strict=False)
+    target_path = (base_dir / relative_path).resolve(strict=False)
+
+    try:
+        target_path.relative_to(base_dir)
+    except ValueError:
         raise PermissionError(f"越权拦截：你试图访问沙盒外的路径 '{relative_path}'！你只能在 office 工位内活动。")
-    
-    return target_path
+
+    return str(target_path)
+
+
+_BLOCKED_EXECUTABLES = {
+    "bash", "bash.exe", "cmd", "cmd.exe", "pwsh", "pwsh.exe",
+    "powershell", "powershell.exe", "sh", "sh.exe", "zsh", "zsh.exe",
+}
+_INLINE_CODE_FLAGS = {"-c", "-e", "--eval", "/c"}
+_INTERNAL_COMMANDS = {"dir", "echo", "ls"}
+_SHELL_META = re.compile(r"[;&|<>`\r\n]|\$\(")
+_SECRET_ENV = re.compile(
+    r"(?:key|token|secret|password|credential|authorization|cookie)",
+    re.IGNORECASE,
+)
+
+
+def _restricted_environment() -> dict[str, str]:
+    allowed = {
+        "COMSPEC", "LANG", "LC_ALL", "PATH", "PATHEXT", "SYSTEMROOT",
+        "TEMP", "TMP", "WINDIR", "PYTHONIOENCODING",
+    }
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in allowed and not _SECRET_ENV.search(key)
+    }
+    env["HOME"] = OFFICE_DIR
+    env["USERPROFILE"] = OFFICE_DIR
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
+def _parse_restricted_command(command: str) -> list[str]:
+    if not command.strip():
+        raise ValueError("命令不能为空")
+    if _SHELL_META.search(command):
+        raise PermissionError("命令包含管道、重定向或命令链符号")
+
+    parts = shlex.split(command, posix=SYS_OS != "Windows")
+    if not parts:
+        raise ValueError("命令不能为空")
+
+    executable = os.path.basename(parts[0]).lower()
+    if executable in _BLOCKED_EXECUTABLES:
+        raise PermissionError(f"禁止启动嵌套 Shell：{parts[0]}")
+    if executable.startswith(("python", "node")) and any(
+        arg.lower() in _INLINE_CODE_FLAGS for arg in parts[1:]
+    ):
+        raise PermissionError("禁止解释器执行内联代码")
+
+    for arg in parts[1:]:
+        if arg.startswith("~") or "%" in arg or "$env:" in arg.lower():
+            raise PermissionError("命令参数包含主目录或环境变量展开")
+        if ".." in Path(arg).parts:
+            raise PermissionError("命令参数包含父目录跳转")
+        if os.path.isabs(arg):
+            candidate = Path(arg).resolve(strict=False)
+            try:
+                candidate.relative_to(Path(OFFICE_DIR).resolve(strict=False))
+            except ValueError as exc:
+                raise PermissionError(f"命令参数指向 office 外部：{arg}") from exc
+
+    if executable in _INTERNAL_COMMANDS:
+        parts[0] = executable
+        return parts
+
+    resolved = shutil.which(parts[0], path=_restricted_environment().get("PATH"))
+    if resolved is None:
+        raise FileNotFoundError(f"找不到可执行程序：{parts[0]}")
+    parts[0] = resolved
+    return parts
 
 @cyberclaw_tool
 def list_office_files(sub_dir: str = "") -> str:
@@ -88,13 +161,6 @@ def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
     3. 禁止编写 与 跳出office工位 相关的任何语言脚本！
     """
     try:
-        decision = guard_tool_call("local_geek_master", "write_office_file", {
-            "filepath": filepath,
-            "mode": mode
-        })
-        if decision.decision != "allow":
-            return format_contract_denial(decision)
-
         target_path = _get_safe_path(filepath)
         
         # 严格校验传入的 mode
@@ -130,31 +196,27 @@ def execute_office_shell(command: str) -> str:
     5. 禁止一切形式跳出office工位!!! 例如运行跳出或查看office路径的任何脚本以及其他高危操作。
     """
     try:
-        decision = guard_tool_call("local_geek_master", "execute_office_shell", {
-            "command": command
-        })
-        if decision.decision != "allow":
-            return format_contract_denial(decision)
+        argv = _parse_restricted_command(command)
 
-        dangerous_patterns = [
-            r"\.\.",                        # 杀招1：拦截所有相对路径越权 (如 ../)
-            r"(?:^|\s|[<>|&;])/",           # 杀招2：Unix 拦截绝对路径 (连 cat </etc/passwd 这种黑客写法也防了)
-            r"(?:^|\s|[<>|&;])~",           # 杀招3：Unix 拦截用户主目录 (防 ~/.ssh/)
-            r"(?:^|\s|[<>|&;])\\",          # 杀招4：Win 拦截根目录 (防 dir \)
-            r"(?i)(?:^|\s|[<>|&;])[a-z]:",  # 杀招5：Win 拦截直接跳盘符及绝对路径 (防 D:, type C:\...)
-        ]
-        for pattern in dangerous_patterns:
-            if re.search(pattern, command):
-                return f"❌ 权限拒绝：检测到危险的目录跳转指令。你被禁止离开 office 工位！"
+        if argv[0] in {"dir", "ls"}:
+            sub_dir = argv[1] if len(argv) > 1 else ""
+            target = _get_safe_path(sub_dir)
+            if not os.path.isdir(target):
+                return f"❌ 执行异常：目录不存在：{sub_dir}"
+            listing = "\n".join(sorted(os.listdir(target))) or "(空目录)"
+            return f" ● 当前系统: {SYS_OS}\n ● 执行命令: `{command}`\n ● 退出码 (Exit Code): 0\n[STDOUT]\n{listing}"
+        if argv[0] == "echo":
+            return f" ● 当前系统: {SYS_OS}\n ● 执行命令: `{command}`\n ● 退出码 (Exit Code): 0\n[STDOUT]\n{' '.join(argv[1:])}"
 
         result = subprocess.run(
-            command,
-            shell=True,
+            argv,
+            shell=False,
             cwd=OFFICE_DIR,
+            env=_restricted_environment(),
             capture_output=True,
             encoding='utf-8',
             errors='replace',
-            timeout=60
+            timeout=current_execution.get().shell_timeout
         )
         
         output = f" ● 当前系统: {SYS_OS}\n"
@@ -181,6 +243,9 @@ def execute_office_shell(command: str) -> str:
         return output
         
     except subprocess.TimeoutExpired:
-        return "❌ 严重错误：命令执行超时（60s）被熔断！请检查是否有阻塞式交互。"
+        timeout = current_execution.get().shell_timeout
+        return f"❌ 严重错误：命令执行超时（{timeout}s）被熔断！请检查是否有阻塞式交互。"
+    except (PermissionError, ValueError, FileNotFoundError) as e:
+        return f"❌ 权限拒绝：{str(e)}"
     except Exception as e:
         return f"❌ 执行异常：{str(e)}"

@@ -79,6 +79,39 @@ def check_write_path(contract: TaskContract, filepath: str) -> ContractDecision:
     return allow(contract, "scope.can_write", f"路径 {_normalize_path(filepath)} 命中 can_write: {allowed_pattern}")
 
 
+def check_read_path(contract: TaskContract, filepath: str) -> ContractDecision:
+    if not contract.scope.can_read:
+        return deny(contract, "scope.can_read", "active contract 未声明 can_read，默认不允许读取资源")
+
+    allowed, allowed_pattern = _matches_any(filepath, contract.scope.can_read)
+    if not allowed:
+        return deny(contract, "scope.can_read", f"资源 {_normalize_path(filepath)} 未命中 can_read")
+
+    return allow(contract, "scope.can_read", f"资源 {_normalize_path(filepath)} 命中 can_read: {allowed_pattern}")
+
+
+def check_resource_boundary(contract: TaskContract, resource: str | None) -> ContractDecision | None:
+    if not resource:
+        return None
+    boundary_checks = [
+        (contract.scope.forbidden, "scope.forbidden", "deny"),
+        (contract.scope.human_only, "scope.human_only", "require_confirmation"),
+        (contract.scope.review_required, "scope.review_required", "require_confirmation"),
+        (contract.scope.autonomous, "scope.autonomous", "allow"),
+    ]
+    for patterns, clause, decision_type in boundary_checks:
+        matched, pattern = _matches_any(resource, patterns)
+        if not matched:
+            continue
+        reason = f"资源 {_normalize_path(resource)} 命中 {clause}: {pattern}"
+        if decision_type == "deny":
+            return deny(contract, clause, reason)
+        if decision_type == "require_confirmation":
+            return require_confirmation(contract, clause, reason)
+        return allow(contract, clause, reason)
+    return None
+
+
 def _blocked_command(command: str, rule: str) -> bool:
     cmd = command.strip().lower()
     normalized_rule = rule.strip().lower()

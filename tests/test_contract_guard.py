@@ -7,10 +7,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from cyberclaw.core.contracts.guard import guard_tool_call
 from cyberclaw.core.contracts.models import TaskContract
+from cyberclaw.core.contracts.store import approve_contract
 
 
 def make_contract(status="approved"):
-    return TaskContract.model_validate({
+    contract = TaskContract.model_validate({
         "contract_version": "0.1",
         "id": "contract-guard",
         "owner": "local_user",
@@ -29,6 +30,7 @@ def make_contract(status="approved"):
             "require_confirmation_for": [],
         },
     })
+    return approve_contract(contract, "test-owner") if status == "approved" else contract
 
 
 class TestContractGuard(unittest.TestCase):
@@ -41,12 +43,34 @@ class TestContractGuard(unittest.TestCase):
         mock_log.assert_called()
 
     @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None)
+    def test_no_contract_execute_requires_confirmation(self, _mock_load, _mock_log):
+        decision = guard_tool_call(
+            "test-thread",
+            "execute_office_shell",
+            {"command": "python script.py"},
+            capability="execute",
+        )
+        self.assertEqual(decision.decision, "require_confirmation")
+        self.assertEqual(decision.clause, "runtime.baseline_confirmation")
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
     @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract(status="draft"))
     def test_draft_contract_denies(self, _mock_load, mock_log):
         decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "reports/a.md"})
         self.assertEqual(decision.decision, "deny")
         self.assertEqual(decision.clause, "contract.status")
         self.assertTrue(any(call.kwargs.get("event") == "contract_violation" for call in mock_log.call_args_list))
+
+    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
+    @patch("cyberclaw.core.contracts.guard.load_active_contract")
+    def test_modified_approved_contract_denies(self, mock_load, _mock_log):
+        contract = make_contract()
+        contract.objective = "tampered"
+        mock_load.return_value = contract
+        decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "reports/a.md"})
+        self.assertEqual(decision.decision, "deny")
+        self.assertEqual(decision.clause, "contract.approval.contract_hash")
 
     @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
     @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())

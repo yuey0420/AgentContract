@@ -2,12 +2,18 @@ from typing import Annotated, TypedDict
 from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langgraph.graph.message import add_messages
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     # 存储对话历史。
     messages: Annotated[list[BaseMessage], add_messages]
     
     # 摘要压缩
     summary: str
+
+    # 每次用户请求对应一个独立运行，避免跨轮次混用验收证据。
+    run_id: str
+    execution_mode: str
+    process_phase: str
+    process_report: dict
 
 def trim_context_messages(messages: list[BaseMessage], trigger_turns: int = 8, keep_turns: int = 4) -> tuple[list[BaseMessage], list[BaseMessage]]:
     # 按照完整用户回合来裁剪上下文：即 一个会从从HumanMessage开始，直到下一个HumanMessage结束，会把AIMessage、tool_calls、ToolMessage一并保留

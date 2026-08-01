@@ -11,7 +11,9 @@ from cyberclaw.core.tools.sandbox_tools import (
     read_office_file,
     write_office_file,
     execute_office_shell,
-    _get_safe_path
+    _get_safe_path,
+    _parse_restricted_command,
+    _restricted_environment,
 )
 from cyberclaw.core.config import OFFICE_DIR
 
@@ -35,6 +37,20 @@ class TestSandboxTools(unittest.TestCase):
         """测试路径遍历攻击"""
         with self.assertRaises(PermissionError):
             _get_safe_path('../../forbidden/file.txt')
+
+    def test_get_safe_path_rejects_prefix_sibling(self):
+        with self.assertRaises(PermissionError):
+            _get_safe_path('../office_evil/probe.txt')
+
+    def test_restricted_environment_removes_secrets(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "secret", "PATH": os.environ.get("PATH", "")}, clear=False):
+            env = _restricted_environment()
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertEqual(env["HOME"], OFFICE_DIR)
+
+    def test_inline_interpreter_code_is_rejected(self):
+        with self.assertRaises(PermissionError):
+            _parse_restricted_command("python -c print(1)")
 
     @patch('cyberclaw.core.tools.sandbox_tools.os.path.exists', return_value=True)
     @patch('cyberclaw.core.tools.sandbox_tools.os.listdir', return_value=['file1.txt', 'subdir'])
@@ -72,26 +88,23 @@ class TestSandboxTools(unittest.TestCase):
         result = read_office_file.invoke({"filepath": "nonexistent.txt"})
         self.assertIn("文件不存在", result)
 
-    @patch('cyberclaw.core.tools.sandbox_tools.guard_tool_call')
     @patch('builtins.open', new_callable=mock_open)
     @patch('os.makedirs')
-    def test_write_office_file_success(self, mock_makedirs, mock_file, mock_guard):
+    def test_write_office_file_success(self, mock_makedirs, mock_file):
         """测试成功写入办公文件"""
-        mock_guard.return_value = ContractDecision(decision="allow", reason="test")
         result = write_office_file.invoke({"filepath": "test.txt", "content": "test content", "mode": "w"})
         self.assertIn("成功以 覆盖/新建 模式写入文件", result)
         mock_file.assert_called_once()
         mock_makedirs.assert_called_once()
 
-    @patch('cyberclaw.core.tools.sandbox_tools.guard_tool_call')
-    def test_write_office_file_invalid_mode(self, mock_guard):
+    def test_write_office_file_invalid_mode(self):
         """测试写入办公文件 - 无效模式"""
-        mock_guard.return_value = ContractDecision(decision="allow", reason="test")
         result = write_office_file.invoke({"filepath": "test.txt", "content": "test content", "mode": "x"})
         self.assertIn("❌ 错误：mode 参数必须是", result)
 
+    @patch('cyberclaw.core.tools.sandbox_tools._parse_restricted_command', return_value=['safe-tool'])
     @patch('cyberclaw.core.tools.sandbox_tools.subprocess.run')
-    def test_execute_office_shell_safe_command(self, mock_subprocess):
+    def test_execute_office_shell_safe_command(self, mock_subprocess, _mock_parse):
         """测试执行安全的 shell 命令"""
         # Mock subprocess 结果
         mock_result = mock_subprocess.return_value
@@ -99,9 +112,7 @@ class TestSandboxTools(unittest.TestCase):
         mock_result.stdout = "command output"
         mock_result.stderr = ""
 
-        with patch('cyberclaw.core.tools.sandbox_tools.guard_tool_call') as mock_guard:
-            mock_guard.return_value = ContractDecision(decision="allow", reason="test")
-            result = execute_office_shell.invoke({"command": "ls"})
+        result = execute_office_shell.invoke({"command": "ls"})
         # 输出格式包含前缀空格和中文冒号 - 使用更宽松的匹配
         self.assertIn("ls", result)
         self.assertIn("command output", result)
@@ -118,9 +129,7 @@ class TestSandboxTools(unittest.TestCase):
 
         for cmd in dangerous_commands:
             with self.subTest(cmd=cmd):
-                with patch('cyberclaw.core.tools.sandbox_tools.guard_tool_call') as mock_guard:
-                    mock_guard.return_value = ContractDecision(decision="allow", reason="test")
-                    result = execute_office_shell.invoke({"command": cmd})
+                result = execute_office_shell.invoke({"command": cmd})
                 self.assertIn("❌ 权限拒绝", result)
 
 

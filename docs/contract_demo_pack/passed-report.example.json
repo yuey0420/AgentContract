@@ -1,0 +1,56 @@
+{
+  "contract_id": "manual-e2e-20260801",
+  "contract_hash": "sha256:e8d93f70f7f3303d0cf8c6c55373530c4663e55d2856055ec63b2100e86073d2",
+  "run_id": "b4d6e5e3492b40ee9b064d3ab641c197",
+  "status": "passed",
+  "generated_at": "2026-08-01T06:37:25Z",
+  "summary": {
+    "tool_calls": 2,
+    "violations": 0,
+    "denied": 0,
+    "requires_confirmation": 0
+  },
+  "acceptance_results": [
+    {
+      "type": "no_contract_violation",
+      "passed": true,
+      "evidence": []
+    },
+    {
+      "type": "file_exists",
+      "passed": true,
+      "evidence": [
+        {
+          "path": "reports/manual-smoke.txt",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "type": "tool_called",
+      "passed": true,
+      "evidence": [
+        {
+          "ts": "2026-08-01T06:37:23Z",
+          "event": "tool_succeeded",
+          "tool": "write_office_file",
+          "capability": "write",
+          "resource": "reports/manual-smoke.txt"
+        }
+      ]
+    },
+    {
+      "type": "tool_called",
+      "passed": true,
+      "evidence": [
+        {
+          "ts": "2026-08-01T06:37:23Z",
+          "event": "tool_succeeded",
+          "tool": "execute_office_shell",
+          "capability": "execute",
+          "resource": "echo approval-passed"
+        }
+      ]
+    }
+  ]
+}

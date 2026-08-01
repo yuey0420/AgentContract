@@ -40,3 +40,7 @@ workspace/
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+
+# Local brand source exports (published runtime assets live in docs/brand/)
+pactflow-assets/
+export_pactflow_assets.ps1

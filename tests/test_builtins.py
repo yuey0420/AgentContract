@@ -3,7 +3,6 @@ from unittest.mock import patch, mock_open
 import os
 import sys
 import tempfile
-import json
 from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -12,7 +11,8 @@ from cyberclaw.core.tools.builtins import (
     get_current_time,
     calculator
 )
-from cyberclaw.core.config import MEMORY_DIR, TASKS_FILE
+from cyberclaw.core.config import MEMORY_DIR
+from cyberclaw.core.runtime_store import RuntimeStore
 
 
 class TestBuiltInTools(unittest.TestCase):
@@ -85,21 +85,14 @@ class TestBuiltInTools(unittest.TestCase):
 class TestScheduledTasks(unittest.TestCase):
 
     def setUp(self):
-        # 创建临时任务文件
-        self.temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
-        self.original_tasks_file = TASKS_FILE
-        # 更新 TASKS_FILE 指向临时文件
-        import cyberclaw.core.tools.builtins
-        cyberclaw.core.tools.builtins.TASKS_FILE = self.temp_file.name
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.store = RuntimeStore(os.path.join(self.temp_dir.name, "runtime.sqlite3"), legacy_tasks_file=None)
+        self.store_patch = patch('cyberclaw.core.tools.builtins.runtime_store', self.store)
+        self.store_patch.start()
 
     def tearDown(self):
-        # 清理临时文件
-        self.temp_file.close()
-        if os.path.exists(self.temp_file.name):
-            os.unlink(self.temp_file.name)
-        # 恢复原始路径
-        import cyberclaw.core.tools.builtins
-        cyberclaw.core.tools.builtins.TASKS_FILE = self.original_tasks_file
+        self.store_patch.stop()
+        self.temp_dir.cleanup()
 
     def test_schedule_task_single(self):
         """测试单次任务调度功能"""
@@ -117,9 +110,7 @@ class TestScheduledTasks(unittest.TestCase):
         self.assertIn("任务已成功加入队列", result)
         self.assertIn("喝水提醒", result)
 
-        # 验证任务已添加到文件
-        with open(self.temp_file.name, 'r', encoding='utf-8') as f:
-            tasks_data = json.load(f)
+        tasks_data = self.store.list_scheduled_tasks()
 
         self.assertEqual(len(tasks_data), 1)
         self.assertEqual(tasks_data[0]["description"], "喝水提醒")
@@ -135,10 +126,6 @@ class TestScheduledTasks(unittest.TestCase):
     def test_list_scheduled_tasks_empty(self):
         """测试列出空任务列表"""
         from cyberclaw.core.tools.builtins import list_scheduled_tasks
-
-        # 确保文件为空
-        with open(self.temp_file.name, 'w') as f:
-            f.write("")
 
         result = list_scheduled_tasks.invoke({})
         # 兼容两种可能的返回消息
@@ -184,12 +171,10 @@ class TestScheduledTasks(unittest.TestCase):
 class TestScheduledTasksWithTasks(unittest.TestCase):
 
     def setUp(self):
-        self.temp_tasks_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
-
-        # 设置临时任务文件路径
-        self.original_tasks_file = TASKS_FILE
-        import cyberclaw.core.tools.builtins
-        cyberclaw.core.tools.builtins.TASKS_FILE = self.temp_tasks_file.name
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.store = RuntimeStore(os.path.join(self.temp_dir.name, "runtime.sqlite3"), legacy_tasks_file=None)
+        self.store_patch = patch('cyberclaw.core.tools.builtins.runtime_store', self.store)
+        self.store_patch.start()
 
         # 添加一些测试任务
         future_time = (datetime.now().replace(hour=9, minute=0, second=0)
@@ -200,34 +185,12 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
 
         target_time = future_time.strftime("%Y-%m-%d %H:%M:%S")
 
-        test_tasks = [
-            {
-                "id": "task1",
-                "target_time": target_time,
-                "description": "任务 1",
-                "repeat": None,
-                "repeat_count": None
-            },
-            {
-                "id": "task2",
-                "target_time": target_time,
-                "description": "任务 2",
-                "repeat": None,
-                "repeat_count": None
-            }
-        ]
-
-        with open(self.temp_tasks_file.name, 'w', encoding='utf-8') as f:
-            json.dump(test_tasks, f, ensure_ascii=False, indent=2)
+        self.store.create_scheduled_task(target_time, "任务 1", task_id="task1")
+        self.store.create_scheduled_task(target_time, "任务 2", task_id="task2")
 
     def tearDown(self):
-        # 清理临时文件
-        self.temp_tasks_file.close()
-        if os.path.exists(self.temp_tasks_file.name):
-            os.unlink(self.temp_tasks_file.name)
-        # 恢复原始路径
-        import cyberclaw.core.tools.builtins
-        cyberclaw.core.tools.builtins.TASKS_FILE = self.original_tasks_file
+        self.store_patch.stop()
+        self.temp_dir.cleanup()
 
     def test_list_scheduled_tasks_non_empty(self):
         """测试列出非空任务列表"""

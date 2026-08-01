@@ -51,6 +51,18 @@ class TestContractModels(unittest.TestCase):
         with self.assertRaises(ValidationError):
             TaskContract.model_validate(data)
 
+    def test_unknown_contract_field_fails(self):
+        data = sample_contract_data()
+        data["unknown_policy"] = True
+        with self.assertRaises(ValidationError):
+            TaskContract.model_validate(data)
+
+    def test_invalid_limit_fails(self):
+        data = sample_contract_data()
+        data["limits"] = {"max_shell_seconds": 0}
+        with self.assertRaises(ValidationError):
+            TaskContract.model_validate(data)
+
 
 if __name__ == "__main__":
     unittest.main()

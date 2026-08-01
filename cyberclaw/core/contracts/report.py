@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
@@ -7,6 +8,8 @@ from ..config import OFFICE_DIR, PROJECT_ROOT
 from ..logger import audit_logger
 from .models import TaskContract
 from .store import write_report
+from .store import compute_contract_hash
+from ..runtime_store import runtime_store
 
 
 def _read_log_events(thread_id: str) -> list[dict[str, Any]]:
@@ -28,19 +31,39 @@ def _read_log_events(thread_id: str) -> list[dict[str, Any]]:
 def _file_exists(path: str | None) -> bool:
     if not path:
         return False
-    target = os.path.abspath(os.path.join(OFFICE_DIR, path))
-    base = os.path.abspath(OFFICE_DIR)
-    if os.path.commonpath([base, target]) != base:
+    base = Path(OFFICE_DIR).resolve(strict=False)
+    target = (base / path).resolve(strict=False)
+    try:
+        target.relative_to(base)
+    except ValueError:
         return False
-    return os.path.exists(target)
+    return target.exists()
 
 
-def generate_contract_report(contract: TaskContract, thread_id: str = "local_geek_master") -> dict[str, Any]:
-    events = [e for e in _read_log_events(thread_id) if e.get("contract_id") == contract.id]
-    violations = [e for e in events if e.get("event") == "contract_violation"]
-    denied = [e for e in events if e.get("decision") == "deny"]
-    confirmations = [e for e in events if e.get("event") == "contract_confirmation_required"]
-    tool_calls = [e for e in events if e.get("event") in {"contract_check", "contract_confirmation_required"}]
+def generate_contract_report(
+    contract: TaskContract,
+    thread_id: str = "local_geek_master",
+    run_id: str | None = None,
+    store=runtime_store,
+) -> dict[str, Any]:
+    if run_id:
+        events = store.get_run_events(run_id)
+        violations = [e for e in events if e.get("event") == "tool_denied"]
+        denied = violations
+        run_actions = store.list_run_actions(run_id)
+        confirmations = [
+            action for action in run_actions
+            if action.get("status") in {"pending", "approved"}
+        ]
+        if not run_actions:
+            confirmations = [event for event in events if event.get("event") == "approval_required"]
+        tool_calls = [e for e in events if e.get("event") == "tool_succeeded"]
+    else:
+        events = [e for e in _read_log_events(thread_id) if e.get("contract_id") == contract.id]
+        violations = [e for e in events if e.get("event") == "contract_violation"]
+        denied = [e for e in events if e.get("decision") == "deny"]
+        confirmations = [e for e in events if e.get("event") == "contract_confirmation_required"]
+        tool_calls = [e for e in events if e.get("event") == "contract_check"]
 
     acceptance_results = []
     for rule in contract.acceptance:
@@ -54,10 +77,10 @@ def generate_contract_report(contract: TaskContract, thread_id: str = "local_gee
             passed = _file_exists(rule.path)
             evidence = [{"path": rule.path, "exists": passed}]
         elif rule.type == "tool_called":
-            passed = any(e.get("tool") == rule.tool for e in events)
-            evidence = [e for e in events if e.get("tool") == rule.tool]
+            passed = any(e.get("tool") == rule.tool for e in tool_calls)
+            evidence = [e for e in tool_calls if e.get("tool") == rule.tool]
         elif rule.type == "tool_not_called":
-            matching = [e for e in events if e.get("tool") == rule.tool]
+            matching = [e for e in tool_calls if e.get("tool") == rule.tool]
             passed = not matching
             evidence = matching
         else:
@@ -69,10 +92,18 @@ def generate_contract_report(contract: TaskContract, thread_id: str = "local_gee
             "evidence": evidence,
         })
 
-    overall_passed = all(item["passed"] for item in acceptance_results) if acceptance_results else not violations
+    overall_passed = all(item["passed"] for item in acceptance_results) if acceptance_results else None
+    if confirmations:
+        report_status = "inconclusive"
+    elif overall_passed is None:
+        report_status = "inconclusive"
+    else:
+        report_status = "passed" if overall_passed else "failed"
     report = {
         "contract_id": contract.id,
-        "status": "passed" if overall_passed else "failed",
+        "contract_hash": compute_contract_hash(contract),
+        "run_id": run_id,
+        "status": report_status,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "summary": {
             "tool_calls": len(tool_calls),
@@ -82,7 +113,7 @@ def generate_contract_report(contract: TaskContract, thread_id: str = "local_gee
         },
         "acceptance_results": acceptance_results,
     }
-    write_report(contract.id, report)
+    write_report(contract.id, report, run_id=run_id)
     audit_logger.log_event(
         thread_id=thread_id,
         event="contract_acceptance",

@@ -35,7 +35,7 @@ if PROJECT_ROOT not in sys.path:
 # 这样可以正常 import entry.main、import cyberclaw.core...
 
 
-app = typer.Typer(help="CyberClaw - 极客专属的赛博智能终端")# 创建一个 CLI 应用对象
+app = typer.Typer(help="PactFlow - Contract-Governed Agent Runtime")# 创建一个 CLI 应用对象
 console = Console()
 # 创建 Rich 的输出对象
 
@@ -57,8 +57,8 @@ ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 def config_wizard():
     console.clear()
     console.print(Panel(
-        "👾 Welcome to [bold #8d52ff]CyberClaw[/bold #8d52ff]...\n\n☁️[dim] 请完成模型配置，我们将把密钥安全固化在本地。[/dim]", 
-        title="[bold white]✦  CyberClaw Config[/bold white]", 
+        "Welcome to [bold #20c77a]PactFlow[/bold #20c77a].\n\n[dim]请完成模型配置，密钥只保存在本地环境文件中。[/dim]",
+        title="[bold white]PactFlow Config[/bold white]",
         border_style="#8d52ff"
     ))
     provider_raw = questionary.select(
@@ -70,7 +70,7 @@ def config_wizard():
 # 用 questionary.select(...).ask() 弹出选择菜单
 
     if not provider_raw:
-        console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+        console.print("[dim #8d52ff]✦   录入中断，PactFlow 配置已取消。[/dim #8d52ff]")
         return
 
     provider = provider_raw.split(" ")[0].strip()
@@ -82,7 +82,7 @@ def config_wizard():
     ).ask()
 
     if model_name is None:
-        console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+        console.print("[dim #8d52ff]✦   录入中断，PactFlow 配置已取消。[/dim #8d52ff]")
         return
 
     api_key = ""
@@ -99,7 +99,7 @@ def config_wizard():
         ).ask()
 
         if api_key is None:
-            console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+            console.print("[dim #8d52ff]✦   录入中断，PactFlow 配置已取消。[/dim #8d52ff]")
             return
 # questionary.password(...) 会隐藏输入内容
 
@@ -121,7 +121,7 @@ def config_wizard():
         ).ask()
 
     if base_url is None:
-        console.print("[dim #8d52ff]✦   录入中断，CyberClaw 配置已取消。[/dim #8d52ff]")
+        console.print("[dim #8d52ff]✦   录入中断，PactFlow 配置已取消。[/dim #8d52ff]")
         return
 
     console.print("\n[dim]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/dim]")
@@ -174,15 +174,15 @@ def config_wizard():
     console.print(Panel(
         f"配置已保存至 [#8d52ff]{ENV_PATH}[/#8d52ff]\n"
         f"当前默认提供商: [#8d52ff]{provider}[/#8d52ff] | 模型: [#8d52ff]{model_name}[/#8d52ff]\n\n"
-        f"👉 输入 [bold #00ffff]cyberclaw run[/bold #00ffff] 即可启动系统！",
+        f"👉 输入 [bold #00ffff]pactflow run[/bold #00ffff] 即可启动系统（旧命令 cyberclaw 仍兼容）！",
         border_style="#00ffff"
     ))
 
 def _show_boot_error():
     console.print(Panel(
-        "[bold #00ffff]CyberClaw未完成配置![/bold #00ffff]\n\n"
+        "[bold #00ffff]PactFlow未完成配置![/bold #00ffff]\n\n"
         "[#8d52ff]检测到 API Key、模型或Baseurl。请重新执行以下命令完成配置：[/#8d52ff]\n"
-        "[bold #00ffff]cyberclaw config[/bold #00ffff]",
+        "[bold #00ffff]pactflow config[/bold #00ffff]（旧命令 cyberclaw config 仍可用）",
         title="[bold #8d52ff]⚠️ Boot Sequence Failed[/bold #8d52ff]",
         border_style="#8d52ff"
     ))
@@ -223,6 +223,55 @@ def run_monitor():
         cyberclaw_monitor.main()
     except ImportError as e:
         console.print(f"[bold red]启动失败：找不到监视器模块！[/bold red]\n[dim]请确保 monitor.py 和 cli.py 在同一目录下。\n报错信息: {e}[/dim]")
+
+
+@app.command("contract-approve")
+def contract_approve(approved_by: str = typer.Option("local_user", help="批准人标识")):
+    from cyberclaw.core.contracts.store import approve_active_contract
+
+    try:
+        contract = approve_active_contract(approved_by)
+    except Exception as exc:
+        console.print(f"[bold red]契约批准失败：{exc}[/bold red]")
+        raise typer.Exit(code=1)
+    console.print(
+        f"[bold green]契约已批准[/bold green] id={contract.id} "
+        f"hash={contract.approval.contract_hash}"
+    )
+
+
+@app.command("contract-status")
+def contract_status():
+    from cyberclaw.core.contracts.store import compute_contract_hash, contract_has_valid_approval, load_active_contract
+    from cyberclaw.core.runtime_store import runtime_store
+
+    contract = load_active_contract()
+    if contract is None:
+        console.print("当前没有 active contract。")
+        return
+    contract_hash = compute_contract_hash(contract)
+    registry_ok = runtime_store.has_contract_approval(contract.id, contract_hash)
+    console.print({
+        "id": contract.id,
+        "status": contract.status,
+        "hash": contract_hash,
+        "hash_valid": contract_has_valid_approval(contract),
+        "registry_approved": registry_ok,
+    })
+
+
+@app.command("approve-action")
+def approve_action(
+    action_id: str,
+    approved_by: str = typer.Option("local_user", help="批准人标识"),
+):
+    from cyberclaw.core.approval import approval_service
+
+    result = approval_service.approve(action_id, approved_by)
+    if result.status != "approved":
+        console.print("[bold red]批准失败：编号不存在、已处理或已经过期。[/bold red]")
+        raise typer.Exit(code=1)
+    console.print(f"[bold green]已批准一次性操作 {action_id}。[/bold green]")
 
 def main():
     app()

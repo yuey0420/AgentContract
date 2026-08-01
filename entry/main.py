@@ -3,8 +3,11 @@ import sys
 import time
 import asyncio
 import random
+import json
+from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage, ToolMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.types import Command
 
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -17,6 +20,8 @@ from cyberclaw.core.agent import create_agent_app
 from cyberclaw.core.config import DB_PATH
 from cyberclaw.core.bus import task_queue
 from cyberclaw.core.heartbeat import pacemaker_loop
+from cyberclaw.core.approval import ApprovalService
+from cyberclaw.core.runtime_store import runtime_store
 # create_agent_app：创建 agent graph
 # DB_PATH：SQLite 记忆库位置
 # task_queue：任务队列
@@ -65,7 +70,12 @@ def print_banner(): # print_banner()：打印欢迎界面
  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
 {RESET}"""
 
-    sub_title = f"{WHITE}{BOLD} 👾 Welcome to the {PURPLE}{BOLD}CyberClaw{RESET}{WHITE}{BOLD} !  {RESET}"
+    logo = (
+        f"{CYAN}{BOLD}  PF  PACTFLOW{RESET}\n"
+        f"{SILVER}      Contract-Governed Agent Runtime{RESET}"
+    )
+
+    sub_title = f"{WHITE}{BOLD} * Welcome to {PURPLE}{BOLD}PactFlow{RESET}{WHITE}{BOLD} !  {RESET}"
 
     quotes = [
         "It works on my machine.",
@@ -79,11 +89,11 @@ def print_banner(): # print_banner()：打印欢迎界面
         "Hello, World."
     ]
     quote = random.choice(quotes)
-    meta = f" {SILVER}✦{RESET} {CYAN}{quote}{RESET}"
+    meta = f" {SILVER}*{RESET} {CYAN}{quote}{RESET}"
 
     tip = (
-        f"{PURPLE} ✦ {RESET}"
-        f"{SILVER}{PURPLE}{BOLD}CyberClaw{RESET} 已完成启动。输入命令开始，输入 {PURPLE}/exit{RESET}{SILVER} 退出。{RESET}\n"
+        f"{PURPLE} * {RESET}"
+        f"{SILVER}{PURPLE}{BOLD}PactFlow{RESET} 已完成启动。输入任务开始，输入 {PURPLE}/exit{RESET}{SILVER} 退出。{RESET}\n"
     )
 
     print(logo)
@@ -113,12 +123,11 @@ async def async_main():
     current_provider = os.getenv("DEFAULT_PROVIDER", "openai")
     current_model = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
 
-    async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory:
+    with SqliteSaver.from_conn_string(DB_PATH) as memory:
         app = create_agent_app(provider_name=current_provider, model_name=current_model, checkpointer=memory)
         config = {"configurable": {"thread_id": "local_geek_master"}}
-# AsyncSqliteSaver 是 LangGraph 提供的异步 SQLite 存储适配器，用于持久化对话历史或 Agent 状态。
-# from_conn_string(DB_PATH) 根据数据库连接字符串（DB_PATH 应在别处定义，例如 "sqlite:///./data.db"）创建连接。
-# async with 确保连接自动释放，memory 对象将作为对话记忆的 checkpointer。 
+# SqliteSaver 用于保存对话和 interrupt checkpoint；图调用在线程中执行，
+# 避免 Python 3.10 + LangGraph 1.2 的异步 interrupt 上下文缺失。
         class SpinnerState:
             action_words = [
                 "Thinking...",              
@@ -138,10 +147,58 @@ async def async_main():
             is_spinning = False
             start_time = 0
             frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-            is_tool_calling = False 
+            is_tool_calling = False
+            pending_approval = None
             tool_msg = ""           
 
         spinner = SpinnerState()
+        approval_timeout_task = None
+
+        def find_checkpoint_approval(snapshot):
+            for task in getattr(snapshot, "tasks", ()):
+                for interrupt_item in getattr(task, "interrupts", ()):
+                    value = getattr(interrupt_item, "value", None)
+                    if isinstance(value, dict) and value.get("type") == "approval_required":
+                        return value
+            return None
+
+        def render_approval(approval, *, restored=False):
+            arguments = json.dumps(approval.get("arguments", {}), ensure_ascii=False, indent=2)
+            title = "已恢复待审批操作" if restored else "高风险操作需要审批"
+            cprint(f"  \033[38;5;214m┌─ {title} ─────────────\033[0m")
+            cprint(f"  \033[38;5;250m│ 工具：{approval.get('tool')}\033[0m")
+            cprint(f"  \033[38;5;250m│ 参数：{arguments}\033[0m")
+            cprint(f"  \033[38;5;250m│ 风险：{approval.get('risk_level', 'high')}\033[0m")
+            cprint(f"  \033[38;5;250m│ 条款：{approval.get('clause') or 'runtime approval'}\033[0m")
+            cprint(f"  \033[38;5;250m│ 原因：{approval.get('reason')}\033[0m")
+            cprint(f"  \033[38;5;250m│ 有效期至：{approval.get('expires_at')}\033[0m")
+            cprint("  \033[38;5;214m└─ 是否执行？请输入 Y/N ───────────\033[0m")
+
+        async def expire_and_resume(approval):
+            expires_at = datetime.strptime(
+                approval["expires_at"], "%Y-%m-%dT%H:%M:%SZ"
+            ).replace(tzinfo=timezone.utc)
+            delay = max(0.0, (expires_at - datetime.now(timezone.utc)).total_seconds())
+            await asyncio.sleep(delay)
+            if not spinner.pending_approval or spinner.pending_approval.get("action_id") != approval["action_id"]:
+                return
+            result = ApprovalService(runtime_store).get(approval["action_id"])
+            if result.status != "expired":
+                return
+            spinner.pending_approval = None
+            cprint("  \033[38;5;214m⌛ 审批已超时，原工具调用不会执行，正在恢复流程。\033[0m")
+            await task_queue.put(Command(resume={
+                "action_id": approval["action_id"],
+                "status": "expired",
+            }))
+
+        def set_pending_approval(approval, *, restored=False):
+            nonlocal approval_timeout_task
+            spinner.pending_approval = approval
+            render_approval(approval, restored=restored)
+            if approval_timeout_task:
+                approval_timeout_task.cancel()
+            approval_timeout_task = asyncio.create_task(expire_and_resume(approval))
 
 
         def get_bottom_toolbar():
@@ -167,7 +224,7 @@ async def async_main():
         async def agent_worker():
             while True:
                 user_input = await task_queue.get()
-                if user_input.lower() in ["/exit", "/quit"]:
+                if isinstance(user_input, str) and user_input.lower() in ["/exit", "/quit"]:
                     task_queue.task_done()
                     break
                 
@@ -178,12 +235,28 @@ async def async_main():
                 spinner.is_spinning = True
                 spinner.is_tool_calling = False
                 
-                inputs = {"messages": [HumanMessage(content=user_input)]}
+                inputs = (
+                    user_input
+                    if isinstance(user_input, Command)
+                    else {"messages": [HumanMessage(content=user_input)]}
+                )
                 try:
-                    async for event in app.astream(inputs, config=config, stream_mode="updates"):
+                    result = await asyncio.to_thread(app.invoke, inputs, config)
+                    events = [{"__interrupt__": result["__interrupt__"]}] if "__interrupt__" in result else [{"result": result}]
+                    for event in events:
                         for node_name, node_data in event.items():
-                            if node_name == "agent":
-                                last_msg = node_data["messages"][-1]
+                            if node_name == "__interrupt__":
+                                interrupt_item = node_data[0]
+                                approval = interrupt_item.value
+                                spinner.is_spinning = False
+                                spinner.is_tool_calling = False
+                                set_pending_approval(approval)
+                                continue
+                            if node_name == "result":
+                                messages = node_data.get("messages", [])
+                                last_msg = messages[-1] if messages else None
+                                if last_msg is None:
+                                    continue
                                 
                                 if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
                                     for tc in last_msg.tool_calls:
@@ -191,9 +264,7 @@ async def async_main():
                                         spinner.tool_msg = f"唤醒内置工具 : {tc['name']}..."
                                         cprint(f"  ●\033[38;5;51m Tool Call: \033[0m{tc['name']}")
                                         cprint('')
-# app 是 LangGraph 编出来的 agent
-# astream(...) 表示异步流式执行
-# stream_mode="updates" 表示每个节点一有新状态就往外吐
+# app 是 LangGraph 编出来的 agent；调用在线程中执行，输入 UI 仍保持异步。
 
 
                                 elif last_msg.content:
@@ -207,8 +278,20 @@ async def async_main():
                                         formatted_out += "\033[0m" 
                                         cprint(formatted_out)
                                     
-                            elif node_name != "agent": 
-                                spinner.is_tool_calling = False 
+                            elif node_name == "verify":
+                                report = node_data.get("process_report", {})
+                                status = report.get("status")
+                                if status in {"failed", "inconclusive"}:
+                                    cprint(f"  \033[38;5;214m✦ 流程验收状态：{status}，请查看契约报告。\033[0m")
+                                spinner.is_tool_calling = False
+                            elif node_name != "agent":
+                                spinner.is_tool_calling = False
+
+                    report = result.get("process_report") or {}
+                    if report.get("status") in {"failed", "inconclusive"}:
+                        cprint(
+                            f"  \033[38;5;214m✦ 流程验收状态：{report['status']}，请查看契约报告。\033[0m"
+                        )
                                 
                 except Exception as e:
                     spinner.is_spinning = False
@@ -248,6 +331,39 @@ async def async_main():
                     user_input = user_input.strip()
                     if not user_input:
                         continue
+
+                    if spinner.pending_approval:
+                        approval = spinner.pending_approval
+                        action_id = approval["action_id"]
+                        service = ApprovalService(runtime_store)
+                        normalized = user_input.lower()
+                        if normalized in {"y", "yes"}:
+                            result = service.approve(action_id, "local_user")
+                            label = (
+                                "已批准，正在精确恢复原工具调用"
+                                if result.status == "approved"
+                                else f"审批未生效（状态：{result.status}），原工具调用不会执行"
+                            )
+                        elif normalized in {"n", "no"}:
+                            result = service.reject(action_id, "local_user")
+                            label = "已拒绝，原工具调用不会执行"
+                        else:
+                            cprint("  \033[31m请输入 Y（批准）或 N（拒绝）。\033[0m")
+                            continue
+
+                        spinner.pending_approval = None
+                        if approval_timeout_task:
+                            approval_timeout_task.cancel()
+                        cprint(f"  \033[38;5;51m✓ {label}。\033[0m")
+                        await task_queue.put(Command(resume={
+                            "action_id": action_id,
+                            "status": result.status,
+                        }))
+                        continue
+
+                    if user_input.lower().startswith("/approve "):
+                        cprint("  \033[31m当前版本使用内联 Y/N 审批，无需手输审批编号。\033[0m")
+                        continue
                     
 
                     padded_bubble = f"  ❯ {user_input}    "
@@ -255,11 +371,11 @@ async def async_main():
                     
                     await task_queue.put(user_input)
                     if user_input.lower() in ["/exit", "/quit"]:
-                        cprint("  \033[38;5;141m✦ 记忆已固化，CyberClaw 进入休眠。\033[0m")
+                        cprint("  \033[38;5;141m✦ 记忆已固化，PactFlow 进入休眠。\033[0m")
                         break
                         
                 except (KeyboardInterrupt, EOFError):
-                    cprint("\n  \033[38;5;141m✦ 强制中断，CyberClaw 进入休眠。\033[0m")
+                    cprint("\n  \033[38;5;141m✦ 强制中断，PactFlow 进入休眠。\033[0m")
                     await task_queue.put("/exit")
                     break
 
@@ -271,12 +387,27 @@ async def async_main():
 # 让终端输出和输入控件更和谐地共存
             worker = asyncio.create_task(agent_worker())
             heartbeat_worker = asyncio.create_task(pacemaker_loop(check_interval=10))   
+            checkpoint_approval = find_checkpoint_approval(
+                await asyncio.to_thread(app.get_state, config)
+            )
+            if checkpoint_approval:
+                stored = ApprovalService(runtime_store).get(checkpoint_approval["action_id"])
+                if stored.status == "pending":
+                    set_pending_approval(checkpoint_approval, restored=True)
+                else:
+                    cprint(f"  \033[38;5;214m✦ 恢复审批状态：{stored.status}，正在继续原流程。\033[0m")
+                    await task_queue.put(Command(resume={
+                        "action_id": checkpoint_approval["action_id"],
+                        "status": stored.status,
+                    }))
 # pacemaker_loop(...)
 # 后台心跳任务系统，每 10 秒扫一次到期任务
             await user_input_loop()
             await task_queue.join()
             worker.cancel()
             heartbeat_worker.cancel()
+            if approval_timeout_task:
+                approval_timeout_task.cancel()
 
 def main():
     asyncio.run(async_main())

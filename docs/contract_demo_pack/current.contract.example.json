@@ -2,9 +2,9 @@
   "contract_version": "0.1",
   "id": "demo-contract-001",
   "owner": "local_user",
-  "objective": "演示 CyberClaw 契约层如何约束文件写入、Shell 执行和动态 Skill 运行",
+  "objective": "演示 PactFlow 契约层如何约束文件写入、Shell 执行和动态 Skill 运行",
   "risk_level": "medium",
-  "status": "approved",
+  "status": "draft",
   "scope": {
     "can_read": [
       "reports/**",
@@ -35,6 +35,18 @@
       "curl",
       "wget",
       "powershell Invoke-WebRequest"
+    ],
+    "autonomous": [
+      "reports/**",
+      "demo/**"
+    ],
+    "review_required": [],
+    "human_only": [],
+    "forbidden": [
+      "skills/**",
+      ".env",
+      "**/*.key",
+      "**/*.pem"
     ]
   },
   "limits": {
@@ -57,7 +69,9 @@
       "write_office_file",
       "execute_office_shell"
     ],
-    "require_confirmation_for": []
+    "require_confirmation_for": [
+      "execute_office_shell"
+    ]
   },
   "acceptance": [
     {
@@ -72,11 +86,5 @@
       "tool": "write_office_file"
     }
   ],
-  "approval": {
-    "mode": "confirm_once",
-    "approved_by": "local_user",
-    "approved_at": "2026-06-04T00:00:00Z",
-    "contract_hash": "sha256:demo-placeholder"
-  }
+  "approval": null
 }
-

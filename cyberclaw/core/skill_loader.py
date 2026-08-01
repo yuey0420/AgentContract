@@ -7,7 +7,6 @@ from langchain_core.tools import StructuredTool
 from functools import lru_cache
 
 from .config import SKILLS_DIR
-from .contracts.guard import format_contract_denial, guard_tool_call
 from .logger import audit_logger
 from .tools.sandbox_tools import execute_office_shell
 
@@ -201,13 +200,6 @@ class LazySkillLoader:
                     return "契约拒绝：动态技能必须先 help 再 run。"
                 
                 actual_cmd = command.replace("{baseDir}", f"skills/{skill_info['folder']}")
-                decision = guard_tool_call("local_geek_master", "execute_office_shell", {
-                    "command": actual_cmd,
-                    "skill": skill_info["name"],
-                })
-                if decision.decision != "allow":
-                    return format_contract_denial(decision)
-
                 return execute_office_shell.invoke({"command": actual_cmd})
             else:
                 return "错误：mode 参数只能是 'help' 或 'run'。"
@@ -222,7 +214,12 @@ class LazySkillLoader:
             func=lazy_runner,
             name=skill_info["name"],
             description=mini_description,
-            args_schema=DynamicSkillInput
+            args_schema=DynamicSkillInput,
+            metadata={
+                "capability": "execute",
+                "resource_arg": "command",
+                "help_resource": f"skills/{skill_info['folder']}/SKILL.md",
+            },
         )
     
     def get_all_tools(self, force_rescan: bool = False) -> List[StructuredTool]:
