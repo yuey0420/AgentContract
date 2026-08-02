@@ -198,7 +198,7 @@ pactflow config
 3. 配置 Base URL（可选）
 4. **自动测试连接**，确保配置正确
 
-![配置向导](docs/config.png)
+![PactFlow 配置向导](docs/pactflow-config.svg)
 
 #### 方式二：手动配置
 
@@ -234,7 +234,7 @@ OPENAI_API_KEY=sk-your-api-key-here
 
 > 💡 **可选 Provider 依赖**：OpenAI 兼容接口可直接使用核心依赖；Anthropic / Ollama 等 Provider 需要对应 LangChain 扩展包支持，发布部署前请确认 `requirements.txt` 已包含实际使用的 Provider 依赖。
 
-> 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `CYBERCLAW_WORKSPACE` 环境变量。
+> 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `PACTFLOW_WORKSPACE` 环境变量；旧变量名 `CYBERCLAW_WORKSPACE` 仍兼容。
 
 > 💡 提示：配置完成后，可运行 `pactflow run` 聊天测试连接是否正常。
 
@@ -245,13 +245,13 @@ OPENAI_API_KEY=sk-your-api-key-here
 pactflow run
 ```
 
-![欢迎界面](docs/welcome.png)
+![PactFlow 欢迎界面](docs/pactflow-welcome.svg)
 
 ### 4️⃣ 基本用法
 
 启动后进入交互式对话界面，如图所示：
 
-![聊天界面](docs/chat.png)
+![PactFlow 聊天界面](docs/pactflow-chat.svg)
 
 **常用命令示例：**
 
@@ -297,7 +297,7 @@ PactFlow 内置心跳任务系统（Heartbeat），自动在后台执行定时�
 pactflow monitor
 ```
 
-![监控终端](docs/monitor.png)
+![PactFlow 监控终端](docs/pactflow-monitor.svg)
 
 ---
 
@@ -397,7 +397,7 @@ pactflow contract-status
 - `contract_loaded`
 - `contract_acceptance`
 
-完整演示材料见：[docs/contract_demo_pack/README.md](docs/contract_demo_pack/README.md)。
+完整演示材料见：[docs/contract_demo_pack/](docs/contract_demo_pack/)。
 
 ---
 
@@ -462,23 +462,23 @@ pactflow contract-status
 
 | 模块 | 文件 | 功能 |
 |------|------|------|
-| **Agent 循环** | `cyberclaw/core/agent.py` | LangGraph StateGraph，决策大脑 |
-| **契约层** | `cyberclaw/core/contracts/` | 契约模型、策略校验、工具守卫、验收报告 |
-| **流程层** | `cyberclaw/core/process/` | 运行生命周期、模式切换与自动验收 |
-| **审批服务** | `cyberclaw/core/approval.py` | 批准、拒绝、过期、精确消费与审计 |
-| **运行账本** | `cyberclaw/core/runtime_store.py` | 任务、批准、运行和证据的 SQLite 事务存储 |
-| **技能加载** | `cyberclaw/core/skill_loader.py` | 动态加载 SKILL.md，两段式调用 |
-| **上下文管理** | `cyberclaw/core/context.py` | 消息修剪，双水位记忆 |
-| **内置工具** | `cyberclaw/core/tools/builtins.py` | 时间/计算/任务调度等 |
-| **沙盒工具** | `cyberclaw/core/tools/sandbox_tools.py` | 文件操作 + Shell 执行 |
-| **审计日志** | `cyberclaw/core/logger.py` | JSONL 格式事件记录 |
-| **心跳任务** | `cyberclaw/core/heartbeat.py` | 定时任务检查与触发 |
+| **Agent 循环** | [`core/agent.py`](cyberclaw/core/agent.py) | PactFlow 内部兼容包中的 LangGraph StateGraph，决策大脑 |
+| **契约层** | [`core/contracts/`](cyberclaw/core/contracts/) | 契约模型、策略校验、工具守卫、验收报告 |
+| **流程层** | [`core/process/`](cyberclaw/core/process/) | 运行生命周期、模式切换与自动验收 |
+| **审批服务** | [`core/approval.py`](cyberclaw/core/approval.py) | 批准、拒绝、过期、精确消费与审计 |
+| **运行账本** | [`core/runtime_store.py`](cyberclaw/core/runtime_store.py) | 任务、批准、运行和证据的 SQLite 事务存储 |
+| **技能加载** | [`core/skill_loader.py`](cyberclaw/core/skill_loader.py) | 动态加载 SKILL.md，两段式调用 |
+| **上下文管理** | [`core/context.py`](cyberclaw/core/context.py) | 消息修剪，双水位记忆 |
+| **内置工具** | [`core/tools/builtins.py`](cyberclaw/core/tools/builtins.py) | 时间/计算/任务调度等 |
+| **沙盒工具** | [`core/tools/sandbox_tools.py`](cyberclaw/core/tools/sandbox_tools.py) | 文件操作 + Shell 执行 |
+| **审计日志** | [`core/logger.py`](cyberclaw/core/logger.py) | JSONL 格式事件记录 |
+| **心跳任务** | [`core/heartbeat.py`](cyberclaw/core/heartbeat.py) | 定时任务检查与触发 |
 
 ### 项目结构
 
 ```
 PactFlow/
-├── cyberclaw/                    # 核心包
+├── cyberclaw/                    # 核心包（PactFlow 兼容包名）
 │   ├── core/
 │   │   ├── agent.py              # Agent 循环
 │   │   ├── config.py             # 配置管理
@@ -512,10 +512,10 @@ PactFlow/
 │   └── local_geek_master.jsonl   # JSONL 审计日志（运行时生成）
 ├── docs/                         # 文档与架构图
 │   ├── architect.png             # 系统架构图
-│   ├── monitor.png               # 监控终端截图
-│   ├── welcome.png               # 欢迎界面
-│   ├── chat.png                  # 聊天界面
-│   ├── config.png                # 配置向导
+│   ├── pactflow-monitor.svg      # 监控终端截图
+│   ├── pactflow-welcome.svg      # 欢迎界面
+│   ├── pactflow-chat.svg         # 聊天界面
+│   ├── pactflow-config.svg       # 配置向导
 │   ├── memory.png                # 记忆系统
 │   ├── context_cut.png           # 上下文裁剪
 │   └── contract_demo_pack/       # 契约层演示材料包

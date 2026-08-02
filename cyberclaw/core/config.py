@@ -7,9 +7,11 @@ CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_DIR = os.path.dirname(CORE_DIR)
 PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
 # 通过 __file__ 和多次 os.path.dirname 向上回溯，自动计算出项目的目录结构，让代码不依赖写死的路径。
-WORKSPACE_DIR = os.getenv("CYBERCLAW_WORKSPACE", os.path.join(PROJECT_ROOT, "workspace"))
-# 优先读取环境变量 CYBERCLAW_WORKSPACE 的值（允许用户自定义工作区位置）。
-# 如果环境变量不存在，则默认在项目根目录下创建 workspace 文件夹。
+# PactFlow 命名优先；保留旧环境变量，避免升级后丢失已有工作区。
+WORKSPACE_DIR = os.getenv(
+    "PACTFLOW_WORKSPACE",
+    os.getenv("CYBERCLAW_WORKSPACE", os.path.join(PROJECT_ROOT, "workspace")),
+)
 
 DB_PATH = os.path.join(WORKSPACE_DIR, "state.sqlite3")     # 状态机：潜意识与短期记忆
 RUNTIME_DB_PATH = os.path.join(WORKSPACE_DIR, "runtime.sqlite3")
@@ -27,7 +29,10 @@ CONTRACT_ARCHIVE_DIR = os.path.join(CONTRACTS_DIR, "archive")
 CONTRACT_REPORTS_DIR = os.path.join(CONTRACTS_DIR, "reports")
 CONTRACT_TEMPLATES_DIR = os.path.join(CONTRACTS_DIR, "templates")
 ACTIVE_CONTRACT_FILE = os.path.join(CONTRACT_ACTIVE_DIR, "current.contract.json")
-STRICT_CONTRACTS = os.getenv("CYBERCLAW_STRICT_CONTRACTS", "false").lower() in {"1", "true", "yes", "on"}
+STRICT_CONTRACTS = os.getenv(
+    "PACTFLOW_STRICT_CONTRACTS",
+    os.getenv("CYBERCLAW_STRICT_CONTRACTS", "false"),
+).lower() in {"1", "true", "yes", "on"}
 
 for d in [
     WORKSPACE_DIR,
