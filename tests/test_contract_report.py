@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.contracts.models import TaskContract
-from cyberclaw.core.contracts.report import generate_contract_report
+from pactflow.core.contracts.models import TaskContract
+from pactflow.core.contracts.report import generate_contract_report
 
 
 def make_contract():
@@ -34,8 +34,8 @@ def make_contract():
 
 
 class TestContractReport(unittest.TestCase):
-    @patch("cyberclaw.core.contracts.report.write_report", return_value="report.json")
-    @patch("cyberclaw.core.contracts.report._read_log_events")
+    @patch("pactflow.core.contracts.report.write_report", return_value="report.json")
+    @patch("pactflow.core.contracts.report._read_log_events")
     def test_report_passes_without_violation(self, mock_events, _mock_write):
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "reports"))
@@ -51,14 +51,14 @@ class TestContractReport(unittest.TestCase):
                 }
             ]
 
-            with patch("cyberclaw.core.contracts.report.OFFICE_DIR", tmp):
+            with patch("pactflow.core.contracts.report.OFFICE_DIR", tmp):
                 report = generate_contract_report(make_contract(), thread_id="test-thread")
 
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["summary"]["violations"], 0)
 
-    @patch("cyberclaw.core.contracts.report.write_report", return_value="report.json")
-    @patch("cyberclaw.core.contracts.report._read_log_events")
+    @patch("pactflow.core.contracts.report.write_report", return_value="report.json")
+    @patch("pactflow.core.contracts.report._read_log_events")
     def test_report_fails_with_violation(self, mock_events, _mock_write):
         mock_events.return_value = [
             {

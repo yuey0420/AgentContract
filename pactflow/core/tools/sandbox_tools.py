@@ -3,7 +3,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
-from .base import cyberclaw_tool
+from .base import pactflow_tool
 from ..config import OFFICE_DIR
 from ..execution import current_execution
 import re
@@ -97,7 +97,7 @@ def _parse_restricted_command(command: str) -> list[str]:
     parts[0] = resolved
     return parts
 
-@cyberclaw_tool
+@pactflow_tool
 def list_office_files(sub_dir: str = "") -> str:
     """
     查看你的 office 工位里有哪些文件和文件夹。
@@ -123,7 +123,7 @@ def list_office_files(sub_dir: str = "") -> str:
     except Exception as e:
         return str(e)
     
-@cyberclaw_tool
+@pactflow_tool
 def read_office_file(filepath: str) -> str:
     """
     读取 office 工位里指定文件的内容。
@@ -143,7 +143,7 @@ def read_office_file(filepath: str) -> str:
     except Exception as e:
         return str(e)
     
-@cyberclaw_tool
+@pactflow_tool
 def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
     """
     在 office 工位里操作文件内容。
@@ -183,7 +183,7 @@ def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
         return str(e)
     
 
-@cyberclaw_tool
+@pactflow_tool
 def execute_office_shell(command: str) -> str:
     """
     在 office 工位中执行 Shell 命令。

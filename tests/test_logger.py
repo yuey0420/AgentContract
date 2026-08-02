@@ -1,6 +1,6 @@
 import unittest
 
-from cyberclaw.core.logger import sanitize_log_value
+from pactflow.core.logger import sanitize_log_value
 
 
 class TestLogSanitization(unittest.TestCase):

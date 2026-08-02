@@ -5,8 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.contracts.models import ContractDecision
-from cyberclaw.core.tools.sandbox_tools import (
+from pactflow.core.contracts.models import ContractDecision
+from pactflow.core.tools.sandbox_tools import (
     list_office_files,
     read_office_file,
     write_office_file,
@@ -15,7 +15,7 @@ from cyberclaw.core.tools.sandbox_tools import (
     _parse_restricted_command,
     _restricted_environment,
 )
-from cyberclaw.core.config import OFFICE_DIR
+from pactflow.core.config import OFFICE_DIR
 
 
 class TestSandboxTools(unittest.TestCase):
@@ -52,9 +52,9 @@ class TestSandboxTools(unittest.TestCase):
         with self.assertRaises(PermissionError):
             _parse_restricted_command("python -c print(1)")
 
-    @patch('cyberclaw.core.tools.sandbox_tools.os.path.exists', return_value=True)
-    @patch('cyberclaw.core.tools.sandbox_tools.os.listdir', return_value=['file1.txt', 'subdir'])
-    @patch('cyberclaw.core.tools.sandbox_tools.os.path.isdir', side_effect=lambda x: x.endswith('subdir'))
+    @patch('pactflow.core.tools.sandbox_tools.os.path.exists', return_value=True)
+    @patch('pactflow.core.tools.sandbox_tools.os.listdir', return_value=['file1.txt', 'subdir'])
+    @patch('pactflow.core.tools.sandbox_tools.os.path.isdir', side_effect=lambda x: x.endswith('subdir'))
     def test_list_office_files(self, mock_isdir, mock_listdir, mock_exists):
         """测试列出办公文件功能"""
         # 工具需要通过 .invoke() 调用
@@ -68,13 +68,13 @@ class TestSandboxTools(unittest.TestCase):
         self.assertIn("📄 file1.txt", result)
         self.assertIn("📁 subdir", result)
 
-    @patch('cyberclaw.core.tools.sandbox_tools.os.path.exists', return_value=False)
+    @patch('pactflow.core.tools.sandbox_tools.os.path.exists', return_value=False)
     def test_list_office_files_nonexistent_dir(self, mock_exists):
         """测试列出不存在目录的文件"""
         result = list_office_files.invoke({"sub_dir": "nonexistent"})
         self.assertIn("目录不存在", result)
 
-    @patch('cyberclaw.core.tools.sandbox_tools.os.path.exists', return_value=True)
+    @patch('pactflow.core.tools.sandbox_tools.os.path.exists', return_value=True)
     @patch('builtins.open', new_callable=mock_open, read_data="file content")
     def test_read_office_file_success(self, mock_file, mock_exists):
         """测试成功读取办公文件"""
@@ -82,7 +82,7 @@ class TestSandboxTools(unittest.TestCase):
         self.assertEqual(result, "file content")
         mock_file.assert_called_once()
 
-    @patch('cyberclaw.core.tools.sandbox_tools.os.path.exists', return_value=False)
+    @patch('pactflow.core.tools.sandbox_tools.os.path.exists', return_value=False)
     def test_read_office_file_nonexistent(self, mock_exists):
         """测试读取不存在的办公文件"""
         result = read_office_file.invoke({"filepath": "nonexistent.txt"})
@@ -102,8 +102,8 @@ class TestSandboxTools(unittest.TestCase):
         result = write_office_file.invoke({"filepath": "test.txt", "content": "test content", "mode": "x"})
         self.assertIn("❌ 错误：mode 参数必须是", result)
 
-    @patch('cyberclaw.core.tools.sandbox_tools._parse_restricted_command', return_value=['safe-tool'])
-    @patch('cyberclaw.core.tools.sandbox_tools.subprocess.run')
+    @patch('pactflow.core.tools.sandbox_tools._parse_restricted_command', return_value=['safe-tool'])
+    @patch('pactflow.core.tools.sandbox_tools.subprocess.run')
     def test_execute_office_shell_safe_command(self, mock_subprocess, _mock_parse):
         """测试执行安全的 shell 命令"""
         # Mock subprocess 结果

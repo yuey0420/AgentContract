@@ -3,10 +3,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from cyberclaw.core.contracts.models import TaskContract
-from cyberclaw.core.contracts.store import approve_contract
-from cyberclaw.core.process.manager import ProcessManager
-from cyberclaw.core.runtime_store import RuntimeStore
+from pactflow.core.contracts.models import TaskContract
+from pactflow.core.contracts.store import approve_contract
+from pactflow.core.process.manager import ProcessManager
+from pactflow.core.runtime_store import RuntimeStore
 
 
 class TestProcessManager(unittest.TestCase):
@@ -18,8 +18,8 @@ class TestProcessManager(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    @patch("cyberclaw.core.process.manager.write_report")
-    @patch("cyberclaw.core.process.manager.load_active_contract", return_value=None)
+    @patch("pactflow.core.process.manager.write_report")
+    @patch("pactflow.core.process.manager.load_active_contract", return_value=None)
     def test_chat_run_is_started_and_finalized(self, _mock_load, _mock_write):
         state = self.manager.start("thread-1", "hello")
         report = self.manager.finalize(state["run_id"], "thread-1")
@@ -29,7 +29,7 @@ class TestProcessManager(unittest.TestCase):
         self.assertEqual(report["status"], "passed")
         self.assertEqual(run["status"], "completed")
 
-    @patch("cyberclaw.core.contracts.report.write_report")
+    @patch("pactflow.core.contracts.report.write_report")
     def test_managed_run_uses_run_scoped_acceptance(self, _mock_write):
         contract = TaskContract.model_validate({
             "contract_version": "0.2",
@@ -43,7 +43,7 @@ class TestProcessManager(unittest.TestCase):
         })
         contract = approve_contract(contract, "tester")
 
-        with patch("cyberclaw.core.process.manager.load_active_contract", return_value=contract):
+        with patch("pactflow.core.process.manager.load_active_contract", return_value=contract):
             state = self.manager.start("thread-1", "write")
             self.store.append_run_event(state["run_id"], "tool_succeeded", {
                 "tool": "write_office_file",
@@ -56,7 +56,7 @@ class TestProcessManager(unittest.TestCase):
         self.assertEqual(report["status"], "passed")
         self.assertEqual(report["run_id"], state["run_id"])
 
-    @patch("cyberclaw.core.process.manager.write_report")
+    @patch("pactflow.core.process.manager.write_report")
     def test_contract_change_makes_run_inconclusive(self, _mock_write):
         contract = TaskContract.model_validate({
             "contract_version": "0.2",
@@ -71,15 +71,15 @@ class TestProcessManager(unittest.TestCase):
         changed = contract.model_copy(deep=True)
         changed.objective = "after"
 
-        with patch("cyberclaw.core.process.manager.load_active_contract", side_effect=[contract, changed]):
+        with patch("pactflow.core.process.manager.load_active_contract", side_effect=[contract, changed]):
             state = self.manager.start("thread-1", "change")
             report = self.manager.finalize(state["run_id"], "thread-1")
 
         self.assertEqual(report["status"], "inconclusive")
         self.assertEqual(self.store.get_run(state["run_id"])["status"], "needs_review")
 
-    @patch("cyberclaw.core.process.manager.write_report")
-    @patch("cyberclaw.core.process.manager.load_active_contract", return_value=None)
+    @patch("pactflow.core.process.manager.write_report")
+    @patch("pactflow.core.process.manager.load_active_contract", return_value=None)
     def test_pending_approval_never_passes(self, _mock_load, _mock_write):
         state = self.manager.start("thread-1", "dangerous action")
         self.store.append_run_event(state["run_id"], "approval_required", {"action_id": "a1"})

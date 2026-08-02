@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.contracts.guard import guard_tool_call
-from cyberclaw.core.contracts.models import TaskContract
-from cyberclaw.core.contracts.store import approve_contract
+from pactflow.core.contracts.guard import guard_tool_call
+from pactflow.core.contracts.models import TaskContract
+from pactflow.core.contracts.store import approve_contract
 
 
 def make_contract(status="approved"):
@@ -34,16 +34,16 @@ def make_contract(status="approved"):
 
 
 class TestContractGuard(unittest.TestCase):
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=None)
     def test_no_active_contract_allows_compatibility(self, _mock_load, mock_log):
         decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "anything.txt"})
         self.assertEqual(decision.decision, "allow")
         self.assertIsNone(decision.contract_id)
         mock_log.assert_called()
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=None)
     def test_no_contract_execute_requires_confirmation(self, _mock_load, _mock_log):
         decision = guard_tool_call(
             "test-thread",
@@ -54,16 +54,16 @@ class TestContractGuard(unittest.TestCase):
         self.assertEqual(decision.decision, "require_confirmation")
         self.assertEqual(decision.clause, "runtime.baseline_confirmation")
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract(status="draft"))
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=make_contract(status="draft"))
     def test_draft_contract_denies(self, _mock_load, mock_log):
         decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "reports/a.md"})
         self.assertEqual(decision.decision, "deny")
         self.assertEqual(decision.clause, "contract.status")
         self.assertTrue(any(call.kwargs.get("event") == "contract_violation" for call in mock_log.call_args_list))
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract")
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract")
     def test_modified_approved_contract_denies(self, mock_load, _mock_log):
         contract = make_contract()
         contract.objective = "tampered"
@@ -72,28 +72,28 @@ class TestContractGuard(unittest.TestCase):
         self.assertEqual(decision.decision, "deny")
         self.assertEqual(decision.clause, "contract.approval.contract_hash")
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=make_contract())
     def test_write_allowed_path(self, _mock_load, _mock_log):
         decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "reports/a.md"})
         self.assertEqual(decision.decision, "allow")
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=make_contract())
     def test_write_blocked_path(self, _mock_load, mock_log):
         decision = guard_tool_call("test-thread", "write_office_file", {"filepath": "skills/a.py"})
         self.assertEqual(decision.decision, "deny")
         self.assertEqual(decision.clause, "scope.cannot_write")
         self.assertTrue(any(call.kwargs.get("event") == "contract_violation" for call in mock_log.call_args_list))
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=make_contract())
     def test_shell_allowed_command(self, _mock_load, _mock_log):
         decision = guard_tool_call("test-thread", "execute_office_shell", {"command": "python script.py"})
         self.assertEqual(decision.decision, "allow")
 
-    @patch("cyberclaw.core.contracts.guard.audit_logger.log_event")
-    @patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=make_contract())
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    @patch("pactflow.core.contracts.guard.load_active_contract", return_value=make_contract())
     def test_shell_blocked_command(self, _mock_load, _mock_log):
         decision = guard_tool_call("test-thread", "execute_office_shell", {"command": "rm -rf tmp"})
         self.assertEqual(decision.decision, "deny")

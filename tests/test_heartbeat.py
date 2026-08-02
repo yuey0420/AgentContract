@@ -5,8 +5,8 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
-from cyberclaw.core.heartbeat import pacemaker_loop
-from cyberclaw.core.runtime_store import RuntimeStore
+from pactflow.core.heartbeat import pacemaker_loop
+from pactflow.core.runtime_store import RuntimeStore
 
 
 class TestRuntimeScheduledTasks(unittest.TestCase):
@@ -57,9 +57,9 @@ class TestPacemaker(unittest.IsolatedAsyncioTestCase):
             if fake_store.claim_due_tasks.called:
                 raise asyncio.CancelledError
 
-        with patch("cyberclaw.core.heartbeat.runtime_store", fake_store), \
-             patch("cyberclaw.core.heartbeat.task_queue", fake_queue), \
-             patch("cyberclaw.core.heartbeat.asyncio.sleep", side_effect=stop_after_first_sleep):
+        with patch("pactflow.core.heartbeat.runtime_store", fake_store), \
+             patch("pactflow.core.heartbeat.task_queue", fake_queue), \
+             patch("pactflow.core.heartbeat.asyncio.sleep", side_effect=stop_after_first_sleep):
             with self.assertRaises(asyncio.CancelledError):
                 await pacemaker_loop(check_interval=0)
 

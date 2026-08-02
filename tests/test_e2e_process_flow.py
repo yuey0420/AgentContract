@@ -10,12 +10,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
-from cyberclaw.core.agent import create_agent_app
-from cyberclaw.core.contracts.models import TaskContract
-from cyberclaw.core.contracts.store import approve_contract
-from cyberclaw.core.process.manager import ProcessManager
-from cyberclaw.core.runtime_store import RuntimeStore
-from cyberclaw.core.tools.sandbox_tools import write_office_file
+from pactflow.core.agent import create_agent_app
+from pactflow.core.contracts.models import TaskContract
+from pactflow.core.contracts.store import approve_contract
+from pactflow.core.process.manager import ProcessManager
+from pactflow.core.runtime_store import RuntimeStore
+from pactflow.core.tools.sandbox_tools import write_office_file
 
 
 def _provider_with_responses(*responses: AIMessage) -> Mock:
@@ -51,16 +51,16 @@ class ProcessE2ETestCase(unittest.TestCase):
 
     def _run_graph(self, provider: Mock, tools: list, contract: TaskContract | None):
         with ExitStack() as stack:
-            stack.enter_context(patch("cyberclaw.core.agent.get_provider", return_value=provider))
-            stack.enter_context(patch("cyberclaw.core.agent.process_manager", self.manager))
-            stack.enter_context(patch("cyberclaw.core.process.manager.load_active_contract", return_value=contract))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=contract))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store))
-            stack.enter_context(patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=contract))
-            stack.enter_context(patch("cyberclaw.core.contracts.report.write_report", return_value="report.json"))
-            stack.enter_context(patch("cyberclaw.core.process.manager.write_report", return_value="report.json"))
-            stack.enter_context(patch("cyberclaw.core.contracts.report.OFFICE_DIR", self.office_dir))
-            stack.enter_context(patch("cyberclaw.core.tools.sandbox_tools.OFFICE_DIR", self.office_dir))
+            stack.enter_context(patch("pactflow.core.agent.get_provider", return_value=provider))
+            stack.enter_context(patch("pactflow.core.agent.process_manager", self.manager))
+            stack.enter_context(patch("pactflow.core.process.manager.load_active_contract", return_value=contract))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=contract))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.runtime_store", self.store))
+            stack.enter_context(patch("pactflow.core.contracts.guard.load_active_contract", return_value=contract))
+            stack.enter_context(patch("pactflow.core.contracts.report.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.process.manager.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.contracts.report.OFFICE_DIR", self.office_dir))
+            stack.enter_context(patch("pactflow.core.tools.sandbox_tools.OFFICE_DIR", self.office_dir))
 
             app = create_agent_app(tools=tools)
             return app.invoke(
@@ -149,13 +149,13 @@ class ProcessE2ETestCase(unittest.TestCase):
         )
         config = {"configurable": {"thread_id": "e2e-thread"}}
         with ExitStack() as stack:
-            stack.enter_context(patch("cyberclaw.core.agent.get_provider", return_value=provider))
-            stack.enter_context(patch("cyberclaw.core.agent.process_manager", self.manager))
-            stack.enter_context(patch("cyberclaw.core.process.manager.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store))
-            stack.enter_context(patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.process.manager.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.agent.get_provider", return_value=provider))
+            stack.enter_context(patch("pactflow.core.agent.process_manager", self.manager))
+            stack.enter_context(patch("pactflow.core.process.manager.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.runtime_store", self.store))
+            stack.enter_context(patch("pactflow.core.contracts.guard.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.process.manager.write_report", return_value="report.json"))
             app = create_agent_app(tools=[external_action], checkpointer=MemorySaver())
 
             first = app.invoke(
@@ -196,13 +196,13 @@ class ProcessE2ETestCase(unittest.TestCase):
         )
         config = {"configurable": {"thread_id": "reject-thread"}}
         with ExitStack() as stack:
-            stack.enter_context(patch("cyberclaw.core.agent.get_provider", return_value=provider))
-            stack.enter_context(patch("cyberclaw.core.agent.process_manager", self.manager))
-            stack.enter_context(patch("cyberclaw.core.process.manager.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store))
-            stack.enter_context(patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.process.manager.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.agent.get_provider", return_value=provider))
+            stack.enter_context(patch("pactflow.core.agent.process_manager", self.manager))
+            stack.enter_context(patch("pactflow.core.process.manager.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.runtime_store", self.store))
+            stack.enter_context(patch("pactflow.core.contracts.guard.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.process.manager.write_report", return_value="report.json"))
             app = create_agent_app(tools=[external_action], checkpointer=MemorySaver())
             first = app.invoke(
                 {"messages": [HumanMessage(content="reject action")], "summary": ""},
@@ -236,13 +236,13 @@ class ProcessE2ETestCase(unittest.TestCase):
         config = {"configurable": {"thread_id": "restart-thread"}}
         checkpoint_path = os.path.join(self.temp_dir.name, "checkpoints.sqlite3")
         with ExitStack() as stack:
-            stack.enter_context(patch("cyberclaw.core.agent.get_provider", return_value=provider))
-            stack.enter_context(patch("cyberclaw.core.agent.process_manager", self.manager))
-            stack.enter_context(patch("cyberclaw.core.process.manager.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store))
-            stack.enter_context(patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.process.manager.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.agent.get_provider", return_value=provider))
+            stack.enter_context(patch("pactflow.core.agent.process_manager", self.manager))
+            stack.enter_context(patch("pactflow.core.process.manager.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.runtime_store", self.store))
+            stack.enter_context(patch("pactflow.core.contracts.guard.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.process.manager.write_report", return_value="report.json"))
 
             with SqliteSaver.from_conn_string(checkpoint_path) as first_saver:
                 first_app = create_agent_app(tools=[external_action], checkpointer=first_saver)
@@ -289,13 +289,13 @@ class ProcessE2ETestCase(unittest.TestCase):
         )
         config = {"configurable": {"thread_id": "expiry-thread"}}
         with ExitStack() as stack:
-            stack.enter_context(patch("cyberclaw.core.agent.get_provider", return_value=provider))
-            stack.enter_context(patch("cyberclaw.core.agent.process_manager", self.manager))
-            stack.enter_context(patch("cyberclaw.core.process.manager.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store))
-            stack.enter_context(patch("cyberclaw.core.contracts.guard.load_active_contract", return_value=None))
-            stack.enter_context(patch("cyberclaw.core.process.manager.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.agent.get_provider", return_value=provider))
+            stack.enter_context(patch("pactflow.core.agent.process_manager", self.manager))
+            stack.enter_context(patch("pactflow.core.process.manager.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.runtime_store", self.store))
+            stack.enter_context(patch("pactflow.core.contracts.guard.load_active_contract", return_value=None))
+            stack.enter_context(patch("pactflow.core.process.manager.write_report", return_value="report.json"))
             app = create_agent_app(tools=[external_action], checkpointer=MemorySaver())
             app.invoke(
                 {"messages": [HumanMessage(content="let approval expire")], "summary": ""},

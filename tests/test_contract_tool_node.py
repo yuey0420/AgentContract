@@ -6,10 +6,10 @@ from unittest.mock import Mock, patch
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
-from cyberclaw.core.contracts.models import ContractDecision, TaskContract
-from cyberclaw.core.contracts.store import approve_contract
-from cyberclaw.core.contracts.tool_node import ContractToolNode
-from cyberclaw.core.runtime_store import RuntimeStore
+from pactflow.core.contracts.models import ContractDecision, TaskContract
+from pactflow.core.contracts.store import approve_contract
+from pactflow.core.contracts.tool_node import ContractToolNode
+from pactflow.core.runtime_store import RuntimeStore
 
 
 class TestContractToolNode(unittest.TestCase):
@@ -38,30 +38,30 @@ class TestContractToolNode(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    @patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None)
-    @patch("cyberclaw.core.contracts.tool_node.guard_tool_call")
+    @patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
     def test_allowed_tool_runs_and_records_evidence(self, mock_guard, _mock_load):
         mock_guard.return_value = ContractDecision(decision="allow", reason="ok")
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store):
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store):
             result = self.node(self.state, self.config)
 
         self.assertEqual(result["messages"][0].content, "ok:x")
         events = self.store.get_run_events(self.run_id)
         self.assertEqual([event["event"] for event in events], ["tool_requested", "tool_succeeded"])
 
-    @patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None)
-    @patch("cyberclaw.core.contracts.tool_node.guard_tool_call")
+    @patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
     def test_denied_tool_never_executes(self, mock_guard, _mock_load):
         mock_guard.return_value = ContractDecision(decision="deny", clause="test", reason="blocked")
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store):
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store):
             result = self.node(self.state, self.config)
 
         self.assertIn("契约拒绝", result["messages"][0].content)
         events = self.store.get_run_events(self.run_id)
         self.assertEqual([event["event"] for event in events], ["tool_requested", "tool_denied"])
 
-    @patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None)
-    @patch("cyberclaw.core.contracts.tool_node.guard_tool_call")
+    @patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
     def test_confirmation_consumes_exact_call_once(self, mock_guard, _mock_load):
         mock_guard.return_value = ContractDecision(
             decision="require_confirmation",
@@ -69,13 +69,13 @@ class TestContractToolNode(unittest.TestCase):
             contract_hash="sha256:test",
             reason="confirm",
         )
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store):
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store):
             def approve_interrupted_call(_payload):
                 action = self.store.list_pending_actions("thread-1")[0]
                 self.assertTrue(self.store.approve_pending_action(action["action_id"], "tester"))
                 return {"action_id": action["action_id"]}
 
-            with patch("cyberclaw.core.contracts.tool_node.interrupt", side_effect=approve_interrupted_call):
+            with patch("pactflow.core.contracts.tool_node.interrupt", side_effect=approve_interrupted_call):
                 result = self.node(self.state, self.config)
 
         self.assertEqual(result["messages"][0].content, "ok:x")
@@ -83,8 +83,8 @@ class TestContractToolNode(unittest.TestCase):
         self.assertEqual(action["status"], "consumed")
         self.assertFalse(self.store.approve_pending_action(action["action_id"], "tester"))
 
-    @patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None)
-    @patch("cyberclaw.core.contracts.tool_node.guard_tool_call")
+    @patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
     def test_multiple_calls_are_not_executed_before_approval_batch_completes(
         self, mock_guard, _mock_load
     ):
@@ -108,14 +108,14 @@ class TestContractToolNode(unittest.TestCase):
             ContractDecision(decision="require_confirmation", clause="test", reason="confirm"),
         ]
         node = ContractToolNode([batch_tool])
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store), \
-             patch("cyberclaw.core.contracts.tool_node.interrupt", side_effect=RuntimeError("paused")):
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store), \
+             patch("pactflow.core.contracts.tool_node.interrupt", side_effect=RuntimeError("paused")):
             with self.assertRaisesRegex(RuntimeError, "paused"):
                 node(state, self.config)
 
         self.assertEqual(executions, [])
 
-    @patch("cyberclaw.core.contracts.tool_node.guard_tool_call")
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
     def test_tool_call_limit_is_enforced(self, mock_guard):
         contract = TaskContract.model_validate({
             "contract_version": "0.2",
@@ -134,15 +134,15 @@ class TestContractToolNode(unittest.TestCase):
             contract_hash=contract.approval.contract_hash,
             reason="ok",
         )
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store), \
-             patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=contract):
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store), \
+             patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=contract):
             result = self.node(self.state, self.config)
 
         self.assertIn("契约拒绝", result["messages"][0].content)
         self.assertIn("max_tool_calls", result["messages"][0].content)
 
-    @patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None)
-    @patch("cyberclaw.core.contracts.tool_node.guard_tool_call")
+    @patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
     def test_error_string_is_recorded_as_failure(self, mock_guard, _mock_load):
         from langchain_core.tools import tool
 
@@ -158,7 +158,7 @@ class TestContractToolNode(unittest.TestCase):
             }])],
         }
         mock_guard.return_value = ContractDecision(decision="allow", reason="ok")
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store):
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store):
             ContractToolNode([failing_tool])(state, self.config)
 
         self.assertEqual(self.store.get_run_events(self.run_id)[-1]["event"], "tool_failed")

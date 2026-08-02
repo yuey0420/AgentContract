@@ -7,12 +7,12 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.tools.builtins import (
+from pactflow.core.tools.builtins import (
     get_current_time,
     calculator
 )
-from cyberclaw.core.config import MEMORY_DIR
-from cyberclaw.core.runtime_store import RuntimeStore
+from pactflow.core.config import MEMORY_DIR
+from pactflow.core.runtime_store import RuntimeStore
 
 
 class TestBuiltInTools(unittest.TestCase):
@@ -61,11 +61,11 @@ class TestBuiltInTools(unittest.TestCase):
                 result = calculator.invoke({"expression": expr})
                 self.assertIn("计算出错", result)
 
-    @patch('cyberclaw.core.tools.builtins.MEMORY_DIR', new_callable=lambda: tempfile.mkdtemp())
-    @patch('cyberclaw.core.tools.builtins.PROFILE_PATH', new_callable=lambda: tempfile.mktemp())
+    @patch('pactflow.core.tools.builtins.MEMORY_DIR', new_callable=lambda: tempfile.mkdtemp())
+    @patch('pactflow.core.tools.builtins.PROFILE_PATH', new_callable=lambda: tempfile.mktemp())
     def test_save_user_profile(self, mock_profile_path, mock_memory_dir):
         """测试保存用户档案功能"""
-        from cyberclaw.core.tools.builtins import save_user_profile
+        from pactflow.core.tools.builtins import save_user_profile
 
         import tempfile
         import os
@@ -87,7 +87,7 @@ class TestScheduledTasks(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.store = RuntimeStore(os.path.join(self.temp_dir.name, "runtime.sqlite3"), legacy_tasks_file=None)
-        self.store_patch = patch('cyberclaw.core.tools.builtins.runtime_store', self.store)
+        self.store_patch = patch('pactflow.core.tools.builtins.runtime_store', self.store)
         self.store_patch.start()
 
     def tearDown(self):
@@ -96,7 +96,7 @@ class TestScheduledTasks(unittest.TestCase):
 
     def test_schedule_task_single(self):
         """测试单次任务调度功能"""
-        from cyberclaw.core.tools.builtins import schedule_task, list_scheduled_tasks
+        from pactflow.core.tools.builtins import schedule_task, list_scheduled_tasks
 
         future_time = (datetime.now().replace(hour=9, minute=0, second=0)
                       if datetime.now().hour >= 9 else
@@ -118,14 +118,14 @@ class TestScheduledTasks(unittest.TestCase):
 
     def test_schedule_task_invalid_time_format(self):
         """测试调度任务 - 无效时间格式"""
-        from cyberclaw.core.tools.builtins import schedule_task
+        from pactflow.core.tools.builtins import schedule_task
 
         result = schedule_task.invoke({"target_time": "invalid_time", "description": "测试任务"})
         self.assertIn("设定失败：时间格式错误", result)
 
     def test_list_scheduled_tasks_empty(self):
         """测试列出空任务列表"""
-        from cyberclaw.core.tools.builtins import list_scheduled_tasks
+        from pactflow.core.tools.builtins import list_scheduled_tasks
 
         result = list_scheduled_tasks.invoke({})
         # 兼容两种可能的返回消息
@@ -133,7 +133,7 @@ class TestScheduledTasks(unittest.TestCase):
 
     def test_get_system_model_info(self):
         """测试获取系统模型信息功能"""
-        from cyberclaw.core.tools.builtins import get_system_model_info
+        from pactflow.core.tools.builtins import get_system_model_info
 
         # 保存原有环境变量
         orig_provider = os.environ.get('DEFAULT_PROVIDER')
@@ -173,7 +173,7 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.store = RuntimeStore(os.path.join(self.temp_dir.name, "runtime.sqlite3"), legacy_tasks_file=None)
-        self.store_patch = patch('cyberclaw.core.tools.builtins.runtime_store', self.store)
+        self.store_patch = patch('pactflow.core.tools.builtins.runtime_store', self.store)
         self.store_patch.start()
 
         # 添加一些测试任务
@@ -194,7 +194,7 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
 
     def test_list_scheduled_tasks_non_empty(self):
         """测试列出非空任务列表"""
-        from cyberclaw.core.tools.builtins import list_scheduled_tasks
+        from pactflow.core.tools.builtins import list_scheduled_tasks
 
         result = list_scheduled_tasks.invoke({})
         self.assertIn("当前待执行任务列表", result)
@@ -203,7 +203,7 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
 
     def test_delete_scheduled_task(self):
         """测试删除计划任务"""
-        from cyberclaw.core.tools.builtins import delete_scheduled_task, list_scheduled_tasks
+        from pactflow.core.tools.builtins import delete_scheduled_task, list_scheduled_tasks
 
         result = delete_scheduled_task.invoke({"task_id": "task1"})
         self.assertIn("已成功取消", result)
@@ -215,14 +215,14 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
 
     def test_delete_nonexistent_task(self):
         """测试删除不存在的任务"""
-        from cyberclaw.core.tools.builtins import delete_scheduled_task
+        from pactflow.core.tools.builtins import delete_scheduled_task
 
         result = delete_scheduled_task.invoke({"task_id": "nonexistent"})
         self.assertIn("删除失败：未找到", result)
 
     def test_modify_scheduled_task(self):
         """测试修改计划任务"""
-        from cyberclaw.core.tools.builtins import modify_scheduled_task, list_scheduled_tasks
+        from pactflow.core.tools.builtins import modify_scheduled_task, list_scheduled_tasks
 
         new_time = (datetime.now().replace(hour=10, minute=0, second=0)
                    if datetime.now().hour >= 10 else
@@ -242,14 +242,14 @@ class TestScheduledTasksWithTasks(unittest.TestCase):
 
     def test_modify_scheduled_task_invalid_time(self):
         """测试修改计划任务 - 无效时间格式"""
-        from cyberclaw.core.tools.builtins import modify_scheduled_task
+        from pactflow.core.tools.builtins import modify_scheduled_task
 
         result = modify_scheduled_task.invoke({"task_id": "task1", "new_time": "invalid_time"})
         self.assertIn("修改失败：时间格式错误", result)
 
     def test_modify_nonexistent_task(self):
         """测试修改不存在的任务"""
-        from cyberclaw.core.tools.builtins import modify_scheduled_task
+        from pactflow.core.tools.builtins import modify_scheduled_task
 
         result = modify_scheduled_task.invoke({"task_id": "nonexistent", "new_description": "不存在的任务"})
         self.assertIn("修改失败：未找到", result)

@@ -186,7 +186,7 @@ pip install -e .
 > pip install -e .
 > ```
 > 
-> 安装完成后，即可在任意目录使用 `pactflow` 命令。旧命令 `cyberclaw` 作为兼容入口继续保留。
+> 安装完成后，即可在任意目录使用 `pactflow` 命令。
 
 ### 2️⃣ 配置
 
@@ -241,7 +241,7 @@ OPENAI_API_KEY=sk-your-api-key-here
 
 > 💡 **可选 Provider 依赖**：OpenAI 兼容接口可直接使用核心依赖；Anthropic / Ollama 等 Provider 需要对应 LangChain 扩展包支持，发布部署前请确认 `requirements.txt` 已包含实际使用的 Provider 依赖。
 
-> 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `PACTFLOW_WORKSPACE` 环境变量；旧变量名 `CYBERCLAW_WORKSPACE` 仍兼容。
+> 💡 **工作区配置**：工作区路径已在代码中初始化，默认为项目根目录的 `workspace` 文件夹，无需在 `.env` 中配置。仅当需要自定义工作区位置时，才设置 `PACTFLOW_WORKSPACE` 环境变量；旧变量名 `PACTFLOW_WORKSPACE` 仍兼容。
 
 > 💡 提示：配置完成后，可运行 `pactflow run` 聊天测试连接是否正常。
 
@@ -508,8 +508,6 @@ PactFlow/
 │   │       ├── base.py           # 工具装饰器
 │   │       ├── builtins.py       # 内置工具
 │   │       └── sandbox_tools.py  # 沙盒工具
-│   └── __init__.py
-├── cyberclaw/                    # 旧包名兼容入口
 │   └── __init__.py
 ├── workspace/                    # 运行时工作区，默认不提交到 Git
 │   ├── office/                   # 沙盒工位

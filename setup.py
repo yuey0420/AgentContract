@@ -19,7 +19,6 @@ setup(
     entry_points={
         "console_scripts": [
             "pactflow=entry.cli:main",
-            "cyberclaw=entry.cli:main",
         ],
     },
     license="MIT",

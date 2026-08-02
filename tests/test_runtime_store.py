@@ -4,8 +4,8 @@ import unittest
 import json
 from unittest.mock import patch
 
-from cyberclaw.core.runtime_store import RuntimeStore
-from cyberclaw.core.contracts.store import (
+from pactflow.core.runtime_store import RuntimeStore
+from pactflow.core.contracts.store import (
     approve_active_contract,
     contract_has_valid_approval,
     load_active_contract,
@@ -87,8 +87,8 @@ class TestRuntimeStore(unittest.TestCase):
                 "tool_policy": {},
             }, file)
 
-        with patch("cyberclaw.core.contracts.store.ACTIVE_CONTRACT_FILE", contract_path), \
-             patch("cyberclaw.core.runtime_store.runtime_store", self.store):
+        with patch("pactflow.core.contracts.store.ACTIVE_CONTRACT_FILE", contract_path), \
+             patch("pactflow.core.runtime_store.runtime_store", self.store):
             approved = approve_active_contract("owner")
             reloaded = load_active_contract()
 

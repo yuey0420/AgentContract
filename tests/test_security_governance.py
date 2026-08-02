@@ -6,11 +6,11 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
-from cyberclaw.core.contracts.instructions import InstructionEnvelope
-from cyberclaw.core.contracts.models import ContractDecision
-from cyberclaw.core.contracts.security_policy import SecurityPolicyRuntime
-from cyberclaw.core.contracts.tool_node import ContractToolNode
-from cyberclaw.core.runtime_store import RuntimeStore
+from pactflow.core.contracts.instructions import InstructionEnvelope
+from pactflow.core.contracts.models import ContractDecision
+from pactflow.core.contracts.security_policy import SecurityPolicyRuntime
+from pactflow.core.contracts.tool_node import ContractToolNode
+from pactflow.core.runtime_store import RuntimeStore
 
 
 class TestSecurityGovernance(unittest.TestCase):
@@ -119,10 +119,10 @@ class TestSecurityGovernance(unittest.TestCase):
             "type": "tool_call",
         }])
 
-        with patch("cyberclaw.core.contracts.tool_node.runtime_store", self.store), \
-             patch("cyberclaw.core.contracts.tool_node.load_active_contract", return_value=None), \
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store), \
+             patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None), \
              patch(
-                 "cyberclaw.core.contracts.tool_node.guard_tool_call",
+                 "pactflow.core.contracts.tool_node.guard_tool_call",
                  return_value=ContractDecision(decision="allow", reason="ok"),
              ):
             source_result = node(
@@ -143,7 +143,7 @@ class TestSecurityGovernance(unittest.TestCase):
                 return {"action_id": action["action_id"]}
 
             with patch(
-                "cyberclaw.core.contracts.tool_node.interrupt",
+                "pactflow.core.contracts.tool_node.interrupt",
                 side_effect=approve_interrupted_call,
             ):
                 node(

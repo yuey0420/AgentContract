@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.contracts.models import TaskContract
+from pactflow.core.contracts.models import TaskContract
 
 
 def sample_contract_data():

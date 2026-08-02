@@ -4,8 +4,8 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from cyberclaw.core.contracts.models import TaskContract
-from cyberclaw.core.contracts.policy import (
+from pactflow.core.contracts.models import TaskContract
+from pactflow.core.contracts.policy import (
     check_resource_boundary,
     check_shell_command,
     check_tool_allowed,
