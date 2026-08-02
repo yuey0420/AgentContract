@@ -469,23 +469,23 @@ pactflow contract-status
 
 | 模块 | 文件 | 功能 |
 |------|------|------|
-| **Agent 循环** | [`core/agent.py`](cyberclaw/core/agent.py) | PactFlow 内部兼容包中的 LangGraph StateGraph，决策大脑 |
-| **契约层** | [`core/contracts/`](cyberclaw/core/contracts/) | 契约模型、策略校验、工具守卫、验收报告 |
-| **流程层** | [`core/process/`](cyberclaw/core/process/) | 运行生命周期、模式切换与自动验收 |
-| **审批服务** | [`core/approval.py`](cyberclaw/core/approval.py) | 批准、拒绝、过期、精确消费与审计 |
-| **运行账本** | [`core/runtime_store.py`](cyberclaw/core/runtime_store.py) | 任务、批准、运行和证据的 SQLite 事务存储 |
-| **技能加载** | [`core/skill_loader.py`](cyberclaw/core/skill_loader.py) | 动态加载 SKILL.md，两段式调用 |
-| **上下文管理** | [`core/context.py`](cyberclaw/core/context.py) | 消息修剪，双水位记忆 |
-| **内置工具** | [`core/tools/builtins.py`](cyberclaw/core/tools/builtins.py) | 时间/计算/任务调度等 |
-| **沙盒工具** | [`core/tools/sandbox_tools.py`](cyberclaw/core/tools/sandbox_tools.py) | 文件操作 + Shell 执行 |
-| **审计日志** | [`core/logger.py`](cyberclaw/core/logger.py) | JSONL 格式事件记录 |
-| **心跳任务** | [`core/heartbeat.py`](cyberclaw/core/heartbeat.py) | 定时任务检查与触发 |
+| **Agent 循环** | [`core/agent.py`](pactflow/core/agent.py) | PactFlow 内部核心包中的 LangGraph StateGraph，决策大脑 |
+| **契约层** | [`core/contracts/`](pactflow/core/contracts/) | 契约模型、策略校验、工具守卫、验收报告 |
+| **流程层** | [`core/process/`](pactflow/core/process/) | 运行生命周期、模式切换与自动验收 |
+| **审批服务** | [`core/approval.py`](pactflow/core/approval.py) | 批准、拒绝、过期、精确消费与审计 |
+| **运行账本** | [`core/runtime_store.py`](pactflow/core/runtime_store.py) | 任务、批准、运行和证据的 SQLite 事务存储 |
+| **技能加载** | [`core/skill_loader.py`](pactflow/core/skill_loader.py) | 动态加载 SKILL.md，两段式调用 |
+| **上下文管理** | [`core/context.py`](pactflow/core/context.py) | 消息修剪，双水位记忆 |
+| **内置工具** | [`core/tools/builtins.py`](pactflow/core/tools/builtins.py) | 时间/计算/任务调度等 |
+| **沙盒工具** | [`core/tools/sandbox_tools.py`](pactflow/core/tools/sandbox_tools.py) | 文件操作 + Shell 执行 |
+| **审计日志** | [`core/logger.py`](pactflow/core/logger.py) | JSONL 格式事件记录 |
+| **心跳任务** | [`core/heartbeat.py`](pactflow/core/heartbeat.py) | 定时任务检查与触发 |
 
 ### 项目结构
 
 ```
 PactFlow/
-├── cyberclaw/                    # 核心包（PactFlow 兼容包名）
+├── pactflow/                     # 核心包（正式包名）
 │   ├── core/
 │   │   ├── agent.py              # Agent 循环
 │   │   ├── config.py             # 配置管理
@@ -508,6 +508,8 @@ PactFlow/
 │   │       ├── base.py           # 工具装饰器
 │   │       ├── builtins.py       # 内置工具
 │   │       └── sandbox_tools.py  # 沙盒工具
+│   └── __init__.py
+├── cyberclaw/                    # 旧包名兼容入口
 │   └── __init__.py
 ├── workspace/                    # 运行时工作区，默认不提交到 Git
 │   ├── office/                   # 沙盒工位

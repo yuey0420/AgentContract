@@ -13,9 +13,9 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
-from cyberclaw.core.agent import create_agent_app
-from cyberclaw.core.approval import approval_service
-from cyberclaw.core.config import CONTRACT_REPORTS_DIR, OFFICE_DIR, PROJECT_ROOT
+from pactflow.core.agent import create_agent_app
+from pactflow.core.approval import approval_service
+from pactflow.core.config import CONTRACT_REPORTS_DIR, OFFICE_DIR, PROJECT_ROOT
 
 
 def _find_interrupt(result: dict[str, Any]) -> dict[str, Any] | None:

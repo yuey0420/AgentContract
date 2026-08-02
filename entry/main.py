@@ -16,12 +16,12 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.application import get_app
 # 终端交互库 prompt_toolkit 负责实现更高级的输入框、底部状态栏、异步刷新
 
-from cyberclaw.core.agent import create_agent_app
-from cyberclaw.core.config import DB_PATH
-from cyberclaw.core.bus import task_queue
-from cyberclaw.core.heartbeat import pacemaker_loop
-from cyberclaw.core.approval import ApprovalService
-from cyberclaw.core.runtime_store import runtime_store
+from pactflow.core.agent import create_agent_app
+from pactflow.core.config import DB_PATH
+from pactflow.core.bus import task_queue
+from pactflow.core.heartbeat import pacemaker_loop
+from pactflow.core.approval import ApprovalService
+from pactflow.core.runtime_store import runtime_store
 # create_agent_app：创建 agent graph
 # DB_PATH：SQLite 记忆库位置
 # task_queue：任务队列

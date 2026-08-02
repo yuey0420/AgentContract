@@ -8,7 +8,7 @@ from rich.status import Status
 from dotenv import set_key, load_dotenv, unset_key
 import sys
 
-from cyberclaw.core.provider import get_provider
+from pactflow.core.provider import get_provider
 from langchain_core.messages import HumanMessage
 
 # 导入依赖
@@ -227,7 +227,7 @@ def run_monitor():
 
 @app.command("contract-approve")
 def contract_approve(approved_by: str = typer.Option("local_user", help="批准人标识")):
-    from cyberclaw.core.contracts.store import approve_active_contract
+    from pactflow.core.contracts.store import approve_active_contract
 
     try:
         contract = approve_active_contract(approved_by)
@@ -242,8 +242,8 @@ def contract_approve(approved_by: str = typer.Option("local_user", help="批准�
 
 @app.command("contract-status")
 def contract_status():
-    from cyberclaw.core.contracts.store import compute_contract_hash, contract_has_valid_approval, load_active_contract
-    from cyberclaw.core.runtime_store import runtime_store
+    from pactflow.core.contracts.store import compute_contract_hash, contract_has_valid_approval, load_active_contract
+    from pactflow.core.runtime_store import runtime_store
 
     contract = load_active_contract()
     if contract is None:
@@ -265,7 +265,7 @@ def approve_action(
     action_id: str,
     approved_by: str = typer.Option("local_user", help="批准人标识"),
 ):
-    from cyberclaw.core.approval import approval_service
+    from pactflow.core.approval import approval_service
 
     result = approval_service.approve(action_id, approved_by)
     if result.status != "approved":
