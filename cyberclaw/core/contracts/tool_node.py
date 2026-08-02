@@ -12,7 +12,9 @@ from ..logger import audit_logger
 from ..execution import ExecutionContext, current_execution
 from ..runtime_store import runtime_store
 from .guard import format_contract_denial, guard_tool_call
+from .instructions import InstructionBuilder, InstructionEnvelope, classify_tool_result
 from .models import ContractDecision, TaskContract
+from .security_policy import PolicyEvaluation, SecurityPolicyRuntime
 from .store import load_active_contract
 
 
@@ -82,8 +84,14 @@ def _result_indicates_failure(content: str) -> bool:
 class ContractToolNode:
     """Single policy and audit gateway for every Agent-visible tool."""
 
-    def __init__(self, tools: Iterable[BaseTool]):
+    def __init__(
+        self,
+        tools: Iterable[BaseTool],
+        security_runtime: SecurityPolicyRuntime | None = None,
+    ):
         self.tools = {tool.name: tool for tool in tools}
+        self.security_runtime = security_runtime or SecurityPolicyRuntime.from_environment()
+        self.instruction_builder = InstructionBuilder(self.security_runtime.mode)
 
     def __call__(self, state: dict[str, Any], config: RunnableConfig) -> dict[str, Any]:
         messages = state.get("messages", [])
@@ -128,7 +136,27 @@ class ContractToolNode:
             except Exception:
                 pass
 
+            raw_references = call.get("reference_tool_ids") or []
+            explicit_references = (
+                [raw_references] if isinstance(raw_references, str) else list(raw_references)
+            )
+            if call.get("reference_tool_id"):
+                explicit_references.append(str(call["reference_tool_id"]))
+            instruction = self.instruction_builder.build(
+                tool=tool,
+                args=args,
+                capability=intent.capability,
+                resource=intent.resource,
+                messages=messages[:-1],
+                run_id=run_id,
+                thread_id=thread_id,
+                tool_call_id=tool_call_id,
+                explicit_reference_tool_ids=explicit_references,
+            )
+            security_evaluation = self.security_runtime.check(instruction)
+
             if run_id:
+                runtime_store.record_instruction(instruction.model_dump())
                 prior_events = runtime_store.get_run_events(run_id)
                 if not any(
                     event.get("event") == "tool_requested"
@@ -138,25 +166,47 @@ class ContractToolNode:
                     runtime_store.append_run_event(run_id, "tool_requested", {
                         "tool": tool_name,
                         "tool_call_id": tool_call_id,
+                        "instruction_id": instruction.instruction_id,
                         "capability": intent.capability,
                         "resource": intent.resource,
+                        "reference_tool_ids": instruction.reference_tool_ids,
+                        "trustworthiness": instruction.trustworthiness,
+                        "confidentiality": instruction.confidentiality,
+                        "risk_level": instruction.risk_level,
                     })
                 if intent.capability in {"write", "execute", "external"}:
                     execution_mode = "managed_task" if contract else "guarded_action"
                     runtime_store.update_run_mode(run_id, execution_mode)
 
-            decision = guard_tool_call(
-                thread_id,
-                tool_name,
-                args,
-                capability=intent.capability,
-                resource=intent.resource,
-            )
-
-            if decision.decision == "allow" and contract and run_id:
-                decision = self._check_limits(contract, run_id, args, intent, decision)
+            self._record_security_evaluation(instruction, security_evaluation)
+            if security_evaluation.effective_decision == "deny":
+                decision = self._security_decision(instruction, security_evaluation)
+            else:
+                decision = guard_tool_call(
+                    thread_id,
+                    tool_name,
+                    args,
+                    capability=intent.capability,
+                    resource=intent.resource,
+                )
+                if decision.decision == "allow" and contract and run_id:
+                    decision = self._check_limits(contract, run_id, args, intent, decision)
+                if (
+                    decision.decision != "deny"
+                    and security_evaluation.effective_decision == "require_confirmation"
+                ):
+                    decision = self._security_decision(
+                        instruction,
+                        security_evaluation,
+                        contract_decision=decision,
+                    )
 
             if decision.decision == "require_confirmation" and run_id:
+                runtime_store.update_instruction(
+                    instruction.instruction_id,
+                    status="awaiting_approval",
+                    policy_decision=decision.decision,
+                )
                 action = approvals.request(
                     run_id=run_id,
                     thread_id=thread_id,
@@ -194,6 +244,11 @@ class ContractToolNode:
                     contract_hash=decision.contract_hash,
                 )
                 if approval.status == "consumed":
+                    runtime_store.update_instruction(
+                        instruction.instruction_id,
+                        status="approved",
+                        policy_decision="allow",
+                    )
                     decision = ContractDecision(
                         decision="allow",
                         contract_id=decision.contract_id,
@@ -204,6 +259,11 @@ class ContractToolNode:
                     )
                 else:
                     status = approval.status
+                    runtime_store.update_instruction(
+                        instruction.instruction_id,
+                        status="denied",
+                        policy_decision="deny",
+                    )
                     runtime_store.append_run_event(run_id, "tool_denied", {
                         "tool": tool_name,
                         "tool_call_id": tool_call_id,
@@ -215,14 +275,22 @@ class ContractToolNode:
                     plans.append({
                         "tool_name": tool_name,
                         "tool_call_id": tool_call_id,
+                        "instruction": instruction,
                         "content": f"操作未执行：人工审批状态为 {status}。",
                     })
                     continue
 
             if decision.decision != "allow":
                 if run_id:
+                    runtime_store.update_instruction(
+                        instruction.instruction_id,
+                        status="denied",
+                        policy_decision=decision.decision,
+                    )
                     runtime_store.append_run_event(run_id, "tool_denied", {
                         "tool": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "instruction_id": instruction.instruction_id,
                         "capability": intent.capability,
                         "resource": intent.resource,
                         "clause": decision.clause,
@@ -231,10 +299,17 @@ class ContractToolNode:
                 plans.append({
                     "tool_name": tool_name,
                     "tool_call_id": tool_call_id,
-                    "content": format_contract_denial(decision),
+                    "instruction": instruction,
+                    "content": self._format_denial(decision),
                 })
                 continue
 
+            if run_id:
+                runtime_store.update_instruction(
+                    instruction.instruction_id,
+                    status="approved",
+                    policy_decision="allow",
+                )
             plans.append({
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
@@ -242,17 +317,22 @@ class ContractToolNode:
                 "args": args,
                 "intent": intent,
                 "contract": contract,
+                "instruction": instruction,
             })
 
         outputs: list[ToolMessage] = []
         for plan in plans:
             tool_name = plan["tool_name"]
             tool_call_id = plan["tool_call_id"]
+            instruction = plan.get("instruction")
             if "content" in plan:
                 outputs.append(ToolMessage(
                     content=plan["content"],
                     tool_call_id=tool_call_id,
                     name=tool_name,
+                    additional_kwargs={
+                        "security": self._message_security(instruction)
+                    } if instruction else {},
                 ))
                 continue
 
@@ -260,6 +340,9 @@ class ContractToolNode:
             args = plan["args"]
             intent = plan["intent"]
             contract = plan["contract"]
+            result_trust, result_confidentiality = classify_tool_result(
+                tool, intent.capability
+            )
             audit_logger.log_event(
                 thread_id=thread_id,
                 event="tool_started",
@@ -282,9 +365,16 @@ class ContractToolNode:
                 content = _result_content(result)
                 result_event = "tool_failed" if _result_indicates_failure(content) else "tool_succeeded"
                 if run_id:
+                    runtime_store.update_instruction(
+                        instruction.instruction_id,
+                        status="failed" if result_event == "tool_failed" else "succeeded",
+                        result_trustworthiness=result_trust,
+                        result_confidentiality=result_confidentiality,
+                    )
                     runtime_store.append_run_event(run_id, result_event, {
                         "tool": tool_name,
                         "tool_call_id": tool_call_id,
+                        "instruction_id": instruction.instruction_id,
                         "capability": intent.capability,
                         "resource": intent.resource,
                     })
@@ -298,11 +388,19 @@ class ContractToolNode:
                     result_summary=content[:200],
                 )
             except Exception as exc:
+                result_trust = "unknown"
                 content = f"工具执行失败：{exc}"
                 if run_id:
+                    runtime_store.update_instruction(
+                        instruction.instruction_id,
+                        status="failed",
+                        result_trustworthiness="unknown",
+                        result_confidentiality=result_confidentiality,
+                    )
                     runtime_store.append_run_event(run_id, "tool_failed", {
                         "tool": tool_name,
                         "tool_call_id": tool_call_id,
+                        "instruction_id": instruction.instruction_id,
                         "capability": intent.capability,
                         "resource": intent.resource,
                         "error": str(exc),
@@ -317,13 +415,112 @@ class ContractToolNode:
                     error=str(exc),
                 )
 
-            outputs.append(ToolMessage(content=content, tool_call_id=tool_call_id, name=tool_name))
+            outputs.append(ToolMessage(
+                content=content,
+                tool_call_id=tool_call_id,
+                name=tool_name,
+                additional_kwargs={"security": self._message_security(
+                    instruction,
+                    trustworthiness=result_trust,
+                    confidentiality=result_confidentiality,
+                )},
+            ))
 
         return {
             "messages": outputs,
             "execution_mode": execution_mode,
             "process_phase": "execute",
         }
+
+    @staticmethod
+    def _message_security(
+        instruction: InstructionEnvelope,
+        *,
+        trustworthiness: str | None = None,
+        confidentiality: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "instruction_id": instruction.instruction_id,
+            "tool_call_id": instruction.tool_call_id,
+            "reference_tool_ids": instruction.reference_tool_ids,
+            "trustworthiness": trustworthiness or instruction.trustworthiness,
+            "confidentiality": confidentiality or instruction.confidentiality,
+            "risk_level": instruction.risk_level,
+        }
+
+    @staticmethod
+    def _format_denial(decision: ContractDecision) -> str:
+        if (decision.clause or "").startswith("security."):
+            return (
+                "安全策略拒绝：本次工具调用未执行。\n"
+                f"策略：{decision.clause}\n"
+                f"原因：{decision.reason}"
+            )
+        return format_contract_denial(decision)
+
+    @staticmethod
+    def _security_decision(
+        instruction: InstructionEnvelope,
+        evaluation: PolicyEvaluation,
+        *,
+        contract_decision: ContractDecision | None = None,
+    ) -> ContractDecision:
+        finding = evaluation.primary_finding
+        return ContractDecision(
+            decision=evaluation.effective_decision,
+            contract_id=contract_decision.contract_id if contract_decision else None,
+            contract_hash=contract_decision.contract_hash if contract_decision else None,
+            clause=finding.policy if finding else "security.policy",
+            reason=finding.reason if finding else "Security policy requires review.",
+            risk_level=instruction.risk_level,
+        )
+
+    @staticmethod
+    def _record_security_evaluation(
+        instruction: InstructionEnvelope,
+        evaluation: PolicyEvaluation,
+    ):
+        if not evaluation.findings:
+            return
+        finding = evaluation.primary_finding
+        event = (
+            "security_policy_observed"
+            if evaluation.mode == "observe"
+            else (
+                "security_policy_denied"
+                if evaluation.effective_decision == "deny"
+                else "security_confirmation_required"
+            )
+        )
+        payload = {
+            "instruction_id": instruction.instruction_id,
+            "tool": instruction.tool_name,
+            "tool_call_id": instruction.tool_call_id,
+            "decision": evaluation.decision,
+            "effective_decision": evaluation.effective_decision,
+            "mode": evaluation.mode,
+            "policy": finding.policy if finding else None,
+            "reason": finding.reason if finding else None,
+            "findings": [item.model_dump() for item in evaluation.findings],
+            "reference_tool_ids": instruction.reference_tool_ids,
+            "trustworthiness": instruction.trustworthiness,
+            "confidentiality": instruction.confidentiality,
+        }
+        if instruction.run_id:
+            prior_events = runtime_store.get_run_events(instruction.run_id)
+            if any(
+                prior.get("event") == event
+                and prior.get("instruction_id") == instruction.instruction_id
+                for prior in prior_events
+            ):
+                return
+            runtime_store.append_run_event(instruction.run_id, event, payload)
+        audit_logger.log_event(
+            thread_id=instruction.thread_id,
+            event=event,
+            run_id=instruction.run_id,
+            **payload,
+        )
 
     @staticmethod
     def _check_limits(

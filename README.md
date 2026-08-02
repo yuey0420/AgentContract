@@ -78,6 +78,13 @@ PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCla
 
 ### 📜 契约层治理
 
+- **Instruction-level security governance**
+  - 每次工具调用统一转换为带 `tool_call_id`、来源引用、可信度、机密级别和风险等级的指令信封
+  - 工具结果的安全标签会传播到后续直接引用它的工具调用，低可信数据驱动写入、执行或外部动作时要求人工确认
+  - 机密数据流向外部工具时直接拒绝，`critical` 风险工具始终要求人工确认
+  - `PACTFLOW_GOVERNANCE_MODE=observe` 可先只记录策略命中，再切换到默认的 `enforce` 强制模式
+  - 指令、父指令、引用工具和策略结果写入 SQLite；敏感参数沿用审批账本的脱敏规则
+
 - **Contract as Runtime Policy**
   - active contract 存放在 `workspace/contracts/active/current.contract.json`
   - 使用 JSON + Pydantic 定义任务目标、权限范围、工具策略和验收规则

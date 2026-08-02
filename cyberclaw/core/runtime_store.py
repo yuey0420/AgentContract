@@ -97,6 +97,34 @@ class RuntimeStore:
                     FOREIGN KEY(run_id) REFERENCES runs(run_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, id);
+                CREATE TABLE IF NOT EXISTS instructions (
+                    instruction_id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    thread_id TEXT NOT NULL,
+                    tool_call_id TEXT NOT NULL,
+                    parent_instruction_id TEXT,
+                    tool_name TEXT NOT NULL,
+                    capability TEXT NOT NULL,
+                    resource TEXT,
+                    args_json TEXT NOT NULL,
+                    reference_tool_ids_json TEXT NOT NULL,
+                    trustworthiness TEXT NOT NULL,
+                    confidentiality TEXT NOT NULL,
+                    risk_level TEXT NOT NULL,
+                    authority TEXT NOT NULL,
+                    governance_mode TEXT NOT NULL,
+                    policy_decision TEXT NOT NULL DEFAULT 'allow',
+                    status TEXT NOT NULL DEFAULT 'requested',
+                    result_trustworthiness TEXT,
+                    result_confidentiality TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(run_id) REFERENCES runs(run_id)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_instructions_run_tool_call
+                    ON instructions(run_id, tool_call_id);
+                CREATE INDEX IF NOT EXISTS idx_instructions_run
+                    ON instructions(run_id, created_at);
                 CREATE TABLE IF NOT EXISTS pending_actions (
                     action_id TEXT PRIMARY KEY,
                     run_id TEXT NOT NULL,
@@ -388,6 +416,102 @@ class RuntimeStore:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         return dict(row) if row else None
+
+    def record_instruction(self, instruction: dict[str, Any]) -> str:
+        instruction_id = str(instruction["instruction_id"])
+        now = _utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO instructions
+                (instruction_id, run_id, thread_id, tool_call_id, parent_instruction_id,
+                 tool_name, capability, resource, args_json, reference_tool_ids_json,
+                 trustworthiness, confidentiality, risk_level, authority, governance_mode,
+                 policy_decision, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'allow', 'requested', ?, ?)
+                ON CONFLICT(instruction_id) DO UPDATE SET
+                    parent_instruction_id = excluded.parent_instruction_id,
+                    args_json = excluded.args_json,
+                    reference_tool_ids_json = excluded.reference_tool_ids_json,
+                    trustworthiness = excluded.trustworthiness,
+                    confidentiality = excluded.confidentiality,
+                    risk_level = excluded.risk_level,
+                    authority = excluded.authority,
+                    governance_mode = excluded.governance_mode,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    instruction_id,
+                    instruction.get("run_id"),
+                    str(instruction["thread_id"]),
+                    str(instruction["tool_call_id"]),
+                    instruction.get("parent_instruction_id"),
+                    str(instruction["tool_name"]),
+                    str(instruction["capability"]),
+                    instruction.get("resource"),
+                    json.dumps(
+                        _safe_action_args(dict(instruction.get("args") or {})),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                    ),
+                    json.dumps(instruction.get("reference_tool_ids") or []),
+                    str(instruction.get("trustworthiness") or "trusted"),
+                    str(instruction.get("confidentiality") or "public"),
+                    str(instruction.get("risk_level") or "low"),
+                    str(instruction.get("authority") or "model"),
+                    str(instruction.get("governance_mode") or "enforce"),
+                    now,
+                    now,
+                ),
+            )
+        return instruction_id
+
+    def update_instruction(
+        self,
+        instruction_id: str,
+        *,
+        status: str,
+        policy_decision: str | None = None,
+        result_trustworthiness: str | None = None,
+        result_confidentiality: str | None = None,
+    ):
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE instructions
+                SET status = ?,
+                    policy_decision = COALESCE(?, policy_decision),
+                    result_trustworthiness = COALESCE(?, result_trustworthiness),
+                    result_confidentiality = COALESCE(?, result_confidentiality),
+                    updated_at = ?
+                WHERE instruction_id = ?
+                """,
+                (
+                    status,
+                    policy_decision,
+                    result_trustworthiness,
+                    result_confidentiality,
+                    _utc_now(),
+                    instruction_id,
+                ),
+            )
+
+    def get_run_instructions(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM instructions WHERE run_id = ? ORDER BY created_at, instruction_id",
+                (run_id,),
+            ).fetchall()
+        instructions: list[dict[str, Any]] = []
+        for row in rows:
+            instruction = dict(row)
+            instruction["args"] = json.loads(instruction.pop("args_json"))
+            instruction["reference_tool_ids"] = json.loads(
+                instruction.pop("reference_tool_ids_json")
+            )
+            instructions.append(instruction)
+        return instructions
 
     @staticmethod
     def action_hash(tool_name: str, args: dict[str, Any], contract_hash: str | None) -> str:
