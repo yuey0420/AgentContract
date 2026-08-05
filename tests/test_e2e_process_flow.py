@@ -112,6 +112,45 @@ class ProcessE2ETestCase(unittest.TestCase):
         self.assertIn("tool_succeeded", [event["event"] for event in events])
         self.assertEqual(events[-1]["event"], "run_verified")
 
+    def test_managed_subtasks_are_completed_in_order(self):
+        provider = _provider_with_responses(
+            AIMessage(content="first step complete"),
+            AIMessage(content="second step complete"),
+        )
+        contract = TaskContract.model_validate({
+            "contract_version": "2.0",
+            "id": "subtask-flow",
+            "owner": "e2e-owner",
+            "objective": "first; second",
+            "status": "approved",
+            "planner_mode": "deterministic",
+            "scope": {},
+            "tool_policy": {},
+            "acceptance": [{"type": "no_contract_violation"}],
+        })
+        with ExitStack() as stack:
+            stack.enter_context(patch("pactflow.core.agent.get_provider", return_value=provider))
+            stack.enter_context(patch("pactflow.core.agent.process_manager", self.manager))
+            stack.enter_context(patch("pactflow.core.process.manager.load_active_contract", return_value=contract))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=contract))
+            stack.enter_context(patch("pactflow.core.contracts.tool_node.runtime_store", self.store))
+            stack.enter_context(patch("pactflow.core.contracts.guard.load_active_contract", return_value=contract))
+            stack.enter_context(patch("pactflow.core.contracts.report.write_report", return_value="report.json"))
+            stack.enter_context(patch("pactflow.core.process.manager.write_report", return_value="report.json"))
+            app = create_agent_app(tools=[])
+            state = app.invoke(
+                {"messages": [HumanMessage(content="first; second")], "summary": ""},
+                config={"configurable": {"thread_id": "subtask-thread"}},
+            )
+
+        self.assertEqual(state["process_report"]["status"], "passed")
+        child_nodes = [node for node in self.store.list_task_nodes(state["run_id"]) if node["parent_node_id"]]
+        self.assertEqual([node["status"] for node in child_nodes], ["completed", "completed"])
+        self.assertEqual(
+            [event["event"] for event in self.store.get_run_events(state["run_id"])].count("task_completed"),
+            2,
+        )
+
     def test_forbidden_resource_is_not_written_and_fails_acceptance(self):
         provider = _provider_with_responses(
             _tool_call("write_office_file", {

@@ -82,6 +82,21 @@ class RuntimeStore:
                     status TEXT NOT NULL,
                     contract_id TEXT,
                     contract_hash TEXT,
+                    task_id TEXT,
+                    task_version TEXT,
+                    plan_version TEXT,
+                    policy_version TEXT,
+                    plan_acknowledged INTEGER NOT NULL DEFAULT 0,
+                    plan_acknowledged_by TEXT,
+                    plan_acknowledged_at TEXT,
+                    acceptance_decision TEXT,
+                    acceptance_decided_by TEXT,
+                    acceptance_decided_at TEXT,
+                    closure_result TEXT,
+                    closed_by TEXT,
+                    closed_at TEXT,
+                    effective_policy_json TEXT,
+                    reconciliation_json TEXT,
                     started_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     completed_at TEXT,
@@ -97,6 +112,61 @@ class RuntimeStore:
                     FOREIGN KEY(run_id) REFERENCES runs(run_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, id);
+                CREATE TABLE IF NOT EXISTS task_nodes (
+                    node_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    parent_node_id TEXT,
+                    title TEXT NOT NULL,
+                    objective TEXT NOT NULL,
+                    sequence INTEGER NOT NULL DEFAULT 0,
+                    depends_on_json TEXT NOT NULL DEFAULT '[]',
+                    acceptance_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    input_json TEXT NOT NULL DEFAULT '{}',
+                    output_json TEXT NOT NULL DEFAULT '{}',
+                    error TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    FOREIGN KEY(run_id) REFERENCES runs(run_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_task_nodes_run
+                    ON task_nodes(run_id, sequence, node_id);
+                CREATE TABLE IF NOT EXISTS run_baselines (
+                    baseline_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    backend TEXT NOT NULL,
+                    root_path TEXT NOT NULL,
+                    revision TEXT,
+                    snapshot_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(run_id) REFERENCES runs(run_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_run_baselines_run ON run_baselines(run_id);
+                CREATE TABLE IF NOT EXISTS run_checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    node_id TEXT,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evidence_level TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(run_id) REFERENCES runs(run_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_run_checkpoints_run ON run_checkpoints(run_id, created_at);
+                CREATE TABLE IF NOT EXISTS run_repositories (
+                    repository_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'primary',
+                    revision TEXT,
+                    parent_repository_id TEXT,
+                    dependency_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(run_id) REFERENCES runs(run_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_run_repositories_run ON run_repositories(run_id, name);
                 CREATE TABLE IF NOT EXISTS instructions (
                     instruction_id TEXT PRIMARY KEY,
                     run_id TEXT,
@@ -163,6 +233,30 @@ class RuntimeStore:
             for column, column_type in migrations.items():
                 if column not in existing_columns:
                     conn.execute(f"ALTER TABLE pending_actions ADD COLUMN {column} {column_type}")
+
+            existing_run_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+            }
+            run_migrations = {
+                "task_id": "TEXT",
+                "task_version": "TEXT",
+                "plan_version": "TEXT",
+                "policy_version": "TEXT",
+                "plan_acknowledged": "INTEGER NOT NULL DEFAULT 0",
+                "plan_acknowledged_by": "TEXT",
+                "plan_acknowledged_at": "TEXT",
+                "acceptance_decision": "TEXT",
+                "acceptance_decided_by": "TEXT",
+                "acceptance_decided_at": "TEXT",
+                "closure_result": "TEXT",
+                "closed_by": "TEXT",
+                "closed_at": "TEXT",
+                "effective_policy_json": "TEXT",
+                "reconciliation_json": "TEXT",
+            }
+            for column, column_type in run_migrations.items():
+                if column not in existing_run_columns:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {column} {column_type}")
 
     def migrate_legacy_tasks(self, tasks_file: str):
         with self._connect() as conn:
@@ -362,6 +456,12 @@ class RuntimeStore:
         mode: str,
         contract_id: str | None = None,
         contract_hash: str | None = None,
+        *,
+        task_id: str | None = None,
+        task_version: str | None = None,
+        plan_version: str | None = None,
+        policy_version: str | None = None,
+        effective_policy: dict[str, Any] | None = None,
     ) -> str:
         run_id = uuid.uuid4().hex
         now = _utc_now()
@@ -369,10 +469,17 @@ class RuntimeStore:
             conn.execute(
                 """
                 INSERT INTO runs
-                (run_id, thread_id, objective, mode, phase, status, contract_id, contract_hash, started_at, updated_at)
-                VALUES (?, ?, ?, ?, 'prepare', 'running', ?, ?, ?, ?)
+                (run_id, thread_id, objective, mode, phase, status, contract_id, contract_hash,
+                 task_id, task_version, plan_version, policy_version, effective_policy_json,
+                 started_at, updated_at)
+                VALUES (?, ?, ?, ?, 'prepare', 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, thread_id, objective, mode, contract_id, contract_hash, now, now),
+                (
+                    run_id, thread_id, objective, mode, contract_id, contract_hash,
+                    task_id, task_version, plan_version, policy_version,
+                    json.dumps(effective_policy or {}, ensure_ascii=False, sort_keys=True, default=str),
+                    now, now,
+                ),
             )
         return run_id
 
@@ -393,6 +500,299 @@ class RuntimeStore:
                 "UPDATE runs SET mode = ?, updated_at = ? WHERE run_id = ?",
                 (mode, _utc_now(), run_id),
             )
+
+    def set_run_reconciliation(self, run_id: str, reconciliation: dict[str, Any]) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE runs SET reconciliation_json = ?, updated_at = ? WHERE run_id = ?",
+                (json.dumps(reconciliation, ensure_ascii=False, default=str), _utc_now(), run_id),
+            )
+        return cursor.rowcount == 1
+
+    def get_run_reconciliation(self, run_id: str) -> dict[str, Any] | None:
+        run = self.get_run(run_id)
+        if not run or not run.get("reconciliation_json"):
+            return None
+        try:
+            return json.loads(run["reconciliation_json"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+    def get_effective_policy(self, run_id: str) -> dict[str, Any] | None:
+        run = self.get_run(run_id)
+        if not run or not run.get("effective_policy_json"):
+            return None
+        try:
+            return json.loads(run["effective_policy_json"])
+        except (TypeError, json.JSONDecodeError):
+            return None
+
+    def create_task_nodes(self, run_id: str, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        now = _utc_now()
+        with self._connect() as conn:
+            for node in nodes:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO task_nodes
+                    (node_id, run_id, parent_node_id, title, objective, sequence,
+                     depends_on_json, acceptance_json, status, input_json, output_json,
+                     error, started_at, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(node["node_id"]), run_id, node.get("parent_node_id"),
+                        str(node.get("title") or node.get("objective") or "task"),
+                        str(node.get("objective") or ""), int(node.get("sequence", 0)),
+                        json.dumps(node.get("depends_on") or [], ensure_ascii=False),
+                        json.dumps(node.get("acceptance") or [], ensure_ascii=False, default=str),
+                        str(node.get("status") or "pending"),
+                        json.dumps(node.get("input") or {}, ensure_ascii=False, default=str),
+                        json.dumps(node.get("output") or {}, ensure_ascii=False, default=str),
+                        node.get("error"), node.get("started_at"), node.get("completed_at"),
+                    ),
+                )
+        return self.list_task_nodes(run_id)
+
+    def list_task_nodes(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_nodes WHERE run_id = ? ORDER BY sequence, node_id",
+                (run_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            for field in ("depends_on_json", "acceptance_json", "input_json", "output_json"):
+                try:
+                    item[field.removesuffix("_json")] = json.loads(item.pop(field))
+                except (TypeError, json.JSONDecodeError):
+                    item[field.removesuffix("_json")] = [] if field != "input_json" and field != "output_json" else {}
+            result.append(item)
+        return result
+
+    def update_task_node(
+        self,
+        node_id: str,
+        *,
+        status: str,
+        output: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> bool:
+        now = _utc_now()
+        completed_at = now if status in {"completed", "failed", "cancelled"} else None
+        started_at = now if status == "running" else None
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE task_nodes SET status = ?, output_json = COALESCE(?, output_json),
+                    error = ?, started_at = COALESCE(?, started_at),
+                    completed_at = COALESCE(?, completed_at)
+                WHERE node_id = ?
+                """,
+                (
+                    status,
+                    json.dumps(output, ensure_ascii=False, default=str) if output is not None else None,
+                    error, started_at, completed_at, node_id,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def create_baseline(
+        self,
+        run_id: str,
+        snapshot: dict[str, Any],
+        *,
+        backend: str = "filesystem",
+        root_path: str = "",
+        revision: str | None = None,
+        baseline_id: str | None = None,
+    ) -> str:
+        baseline_id = baseline_id or uuid.uuid4().hex
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_baselines
+                (baseline_id, run_id, backend, root_path, revision, snapshot_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (baseline_id, run_id, backend, root_path, revision,
+                 json.dumps(snapshot, ensure_ascii=False, default=str), _utc_now()),
+            )
+        return baseline_id
+
+    def get_baseline(self, run_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM run_baselines WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        try:
+            item["snapshot"] = json.loads(item.pop("snapshot_json"))
+        except (TypeError, json.JSONDecodeError):
+            item["snapshot"] = {}
+        return item
+
+    def create_checkpoint(
+        self,
+        run_id: str,
+        kind: str,
+        status: str,
+        evidence_level: str,
+        evidence: dict[str, Any] | None = None,
+        node_id: str | None = None,
+    ) -> str:
+        checkpoint_id = uuid.uuid4().hex
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_checkpoints
+                (checkpoint_id, run_id, node_id, kind, status, evidence_level, evidence_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (checkpoint_id, run_id, node_id, kind, status, evidence_level,
+                 json.dumps(evidence or {}, ensure_ascii=False, default=str), _utc_now()),
+            )
+        return checkpoint_id
+
+    def list_checkpoints(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_checkpoints WHERE run_id = ? ORDER BY created_at, checkpoint_id",
+                (run_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["evidence"] = json.loads(item.pop("evidence_json"))
+            except (TypeError, json.JSONDecodeError):
+                item["evidence"] = {}
+            result.append(item)
+        return result
+
+    def register_repository(
+        self,
+        run_id: str,
+        name: str,
+        path: str,
+        *,
+        role: str = "primary",
+        revision: str | None = None,
+        parent_repository_id: str | None = None,
+        dependency: dict[str, Any] | None = None,
+    ) -> str:
+        repository_id = uuid.uuid4().hex
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO run_repositories
+                (repository_id, run_id, name, path, role, revision, parent_repository_id, dependency_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (repository_id, run_id, name, path, role, revision, parent_repository_id,
+                 json.dumps(dependency or {}, ensure_ascii=False, default=str), _utc_now()),
+            )
+        return repository_id
+
+    def list_repositories(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_repositories WHERE run_id = ? ORDER BY name, repository_id",
+                (run_id,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["dependency"] = json.loads(item.pop("dependency_json"))
+            except (TypeError, json.JSONDecodeError):
+                item["dependency"] = {}
+            result.append(item)
+        return result
+
+    def acknowledge_plan(
+        self,
+        run_id: str,
+        acknowledged_by: str = "runtime",
+        plan_version: str | None = None,
+    ) -> bool:
+        """Record the plan gate without changing the existing tool execution API."""
+        now = _utc_now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE runs
+                SET phase = 'execute', plan_acknowledged = 1,
+                    plan_acknowledged_by = ?, plan_acknowledged_at = ?,
+                    plan_version = COALESCE(?, plan_version), updated_at = ?
+                WHERE run_id = ? AND status = 'running' AND plan_acknowledged = 0
+                """,
+                (acknowledged_by, now, plan_version, now, run_id),
+            )
+            changed = cursor.rowcount == 1
+        if changed:
+            self.append_run_event(run_id, "plan_acknowledged", {
+                "acknowledged_by": acknowledged_by,
+                "plan_version": plan_version,
+            })
+        return changed
+
+    def decide_acceptance(
+        self,
+        run_id: str,
+        decision: str,
+        decided_by: str = "runtime",
+        reason: str = "",
+    ) -> bool:
+        if decision not in {"accepted", "rejected", "needs_review", "waived"}:
+            raise ValueError(f"Unsupported acceptance decision: {decision}")
+        now = _utc_now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE runs
+                SET phase = 'acceptance', acceptance_decision = ?,
+                    acceptance_decided_by = ?, acceptance_decided_at = ?, updated_at = ?
+                WHERE run_id = ? AND status = 'running' AND acceptance_decision IS NULL
+                """,
+                (decision, decided_by, now, now, run_id),
+            )
+            changed = cursor.rowcount == 1
+        if changed:
+            self.append_run_event(run_id, "acceptance_decided", {
+                "decision": decision,
+                "decided_by": decided_by,
+                "reason": reason,
+            })
+        return changed
+
+    def close_run(self, run_id: str, closed_by: str = "runtime", result: str = "accepted") -> bool:
+        if result not in {"accepted", "rejected", "needs_review", "cancelled"}:
+            raise ValueError(f"Unsupported closure result: {result}")
+        now = _utc_now()
+        status = "completed" if result == "accepted" else ("cancelled" if result == "cancelled" else "needs_review")
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE runs
+                SET phase = 'finalize', status = ?, closure_result = ?,
+                    closed_by = ?, closed_at = ?, updated_at = ?,
+                    completed_at = CASE WHEN ? IN ('completed', 'cancelled') THEN ? ELSE completed_at END
+                WHERE run_id = ? AND status = 'running'
+                  AND (acceptance_decision IS NOT NULL OR ? = 'cancelled')
+                """,
+                (status, result, closed_by, now, now, status, now, run_id, result),
+            )
+            changed = cursor.rowcount == 1
+        if changed:
+            self.append_run_event(run_id, "run_closed", {
+                "result": result,
+                "closed_by": closed_by,
+            })
+        return changed
 
     def append_run_event(self, run_id: str, event: str, payload: dict[str, Any] | None = None):
         with self._connect() as conn:

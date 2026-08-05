@@ -10,6 +10,7 @@ from .config import MEMORY_DIR
 from .skill_loader import load_dynamic_skills
 from .contracts.tool_node import ContractToolNode
 from .process import process_manager
+from .process.task_planner import model_decompose_objective
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.runnables.config import set_config_context
 import os
@@ -47,6 +48,7 @@ def create_agent_app(
         核心大脑：读取状态托盘里的历史消息，决定是直接回答，还是调用工具。
         """
         thread_id = config.get("configurable", {}).get("thread_id", "system_default")
+        run_id = state.get("run_id")
 
         raw_messages = state["messages"]
 
@@ -68,6 +70,8 @@ def create_agent_app(
         current_summary = state.get("summary", "")
         final_msgs, discarded_msgs = trim_context_messages(raw_messages, trigger_turns=40, keep_turns=10) # 超过40轮对话触发裁剪 裁剪后保留最近10轮
         state_updates = {}
+        if run_id and state.get("orchestrate_subtasks"):
+            state_updates["task_plan"] = process_manager.store.list_task_nodes(run_id)
 
         if discarded_msgs:
             import sys
@@ -127,6 +131,17 @@ def create_agent_app(
             f"【用户画像数据】\n{profile_content}\n"
             f"【近期摘要数据】\n{active_summary or '暂无记录'}"
         )
+        task_plan = state.get("task_plan") or []
+        if task_plan:
+            plan_lines = "\n".join(
+                f"- {node.get('node_id')}: {node.get('objective')} [{node.get('status', 'pending')}]"
+                for node in task_plan
+            )
+            memory_data += (
+                "\n\n【系统生成的任务计划】\n"
+                "按以下子任务推进，不要扩大契约范围：\n"
+                f"{plan_lines}"
+            )
         msgs_for_llm = [SystemMessage(content=sys_prompt), HumanMessage(content=memory_data)] + [
             m for m in final_msgs if not isinstance(m, SystemMessage)
         ]
@@ -143,6 +158,13 @@ def create_agent_app(
         )
 
         response = llm_with_tools.invoke(msgs_for_llm)
+
+        if not response.tool_calls and run_id and state.get("orchestrate_subtasks"):
+            process_manager.complete_active_task(
+                run_id,
+                {"response": str(response.content or "")[:500]},
+            )
+            state_updates["task_plan"] = process_manager.store.list_task_nodes(run_id)
 
         # 解析大模型的回答并记录到日志
         if response.tool_calls:
@@ -173,20 +195,49 @@ def create_agent_app(
             if isinstance(message, HumanMessage):
                 objective = str(message.content)
                 break
-        return process_manager.start(thread_id, objective)
+        contract = process_manager.active_contract()
+        model_planner = None
+        if contract:
+            planner_mode = process_manager.resolve_planner_mode(contract)
+            if planner_mode == "model":
+                model_planner = (
+                    lambda planned_objective, task_id, max_subtasks, planned_contract:
+                    model_decompose_objective(
+                        llm,
+                        planned_objective,
+                        task_id,
+                        planned_contract,
+                        max_children=max_subtasks,
+                    )
+                )
+        if model_planner is None:
+            return process_manager.start(thread_id, objective)
+        return process_manager.start(thread_id, objective, planner=model_planner)
 
     def verify_node(state: AgentState, config: RunnableConfig) -> dict:
         thread_id = config.get("configurable", {}).get("thread_id", "system_default")
         run_id = state.get("run_id")
         if not run_id:
-            return {"process_phase": "finalize", "process_report": {"status": "inconclusive"}}
+            return {
+                "process_phase": "finalize",
+                "lifecycle_status": "needs_review",
+                "process_report": {"status": "inconclusive", "verification_result": "inconclusive"},
+            }
         report = process_manager.finalize(run_id, thread_id)
-        return {"process_phase": "finalize", "process_report": report}
+        return {
+            "process_phase": "finalize",
+            "lifecycle_status": "closed" if report.get("status") == "passed" else "needs_review",
+            "process_report": report,
+        }
 
     def route_after_agent(state: AgentState) -> str:
         messages = state.get("messages", [])
         if messages and getattr(messages[-1], "tool_calls", None):
             return "tools"
+        if state.get("orchestrate_subtasks"):
+            leaves = [node for node in state.get("task_plan", []) if node.get("parent_node_id")]
+            if any(node.get("status") in {"pending", "running"} for node in leaves):
+                return "agent"
         return "verify"
 
     workflow = StateGraph(AgentState)
@@ -214,7 +265,7 @@ def create_agent_app(
     workflow.add_conditional_edges(
         "agent",
         route_after_agent,
-        {"tools": "tools", "verify": "verify"},
+        {"tools": "tools", "agent": "agent", "verify": "verify"},
     )
 
     workflow.add_edge("tools", "agent")

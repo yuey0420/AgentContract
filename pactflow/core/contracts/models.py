@@ -38,6 +38,7 @@ class ToolPolicy(ContractModel):
 
 
 class AcceptanceRule(ContractModel):
+    id: Optional[str] = None
     type: str
     path: Optional[str] = None
     tool: Optional[str] = None
@@ -57,6 +58,16 @@ class RuntimePolicy(ContractModel):
 class TaskContract(ContractModel):
     contract_version: str
     id: str
+    task_id: Optional[str] = None
+    task_version: str = "1.0"
+    plan_version: str = "1.0"
+    policy_version: str = "1.0"
+    process_profile: str = "managed"
+    auto_decompose: bool = True
+    max_subtasks: int = Field(default=8, ge=1, le=32)
+    orchestrate_subtasks: bool = True
+    repositories: list[dict[str, Any]] = Field(default_factory=list)
+    planner_mode: Literal["model", "deterministic", "none"] = "deterministic"
     owner: str
     objective: str
     inputs: dict[str, Any] = Field(default_factory=dict)

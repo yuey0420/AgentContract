@@ -66,7 +66,7 @@ def generate_contract_report(
         tool_calls = [e for e in events if e.get("event") == "contract_check"]
 
     acceptance_results = []
-    for rule in contract.acceptance:
+    for index, rule in enumerate(contract.acceptance, start=1):
         passed = False
         evidence: list[Any] = []
 
@@ -86,9 +86,17 @@ def generate_contract_report(
         else:
             evidence = [{"unsupported_rule": rule.type}]
 
+        rule_id = rule.id or f"AC-{index:03d}"
         acceptance_results.append({
+            "id": rule_id,
             "type": rule.type,
             "passed": passed,
+            "verification_result": "passed" if passed else "failed",
+            "evidence_level": (
+                "tool_generated"
+                if evidence or rule.type in {"no_contract_violation", "tool_not_called"}
+                else "missing"
+            ),
             "evidence": evidence,
         })
 
@@ -104,6 +112,10 @@ def generate_contract_report(
         "contract_hash": compute_contract_hash(contract),
         "run_id": run_id,
         "status": report_status,
+        "verification_result": (
+            "passed" if report_status == "passed"
+            else ("failed" if report_status == "failed" else "inconclusive")
+        ),
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "summary": {
             "tool_calls": len(tool_calls),

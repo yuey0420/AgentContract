@@ -34,6 +34,27 @@ class TestRuntimeStore(unittest.TestCase):
             ["first", "second"],
         )
 
+    def test_process_lifecycle_records_plan_acceptance_and_closure(self):
+        run_id = self.store.start_run(
+            "thread", "objective", "managed_task",
+            task_id="task-1", task_version="2.0", plan_version="3.0", policy_version="4.0",
+        )
+        self.assertTrue(self.store.acknowledge_plan(run_id, "owner", "3.0"))
+        self.assertFalse(self.store.acknowledge_plan(run_id, "owner", "3.0"))
+        self.assertTrue(self.store.decide_acceptance(run_id, "accepted", "owner", "all AC passed"))
+        self.assertTrue(self.store.close_run(run_id, "owner", "accepted"))
+
+        run = self.store.get_run(run_id)
+        self.assertEqual(run["task_id"], "task-1")
+        self.assertEqual(run["plan_version"], "3.0")
+        self.assertEqual(run["acceptance_decision"], "accepted")
+        self.assertEqual(run["closure_result"], "accepted")
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(
+            [event["event"] for event in self.store.get_run_events(run_id)],
+            ["plan_acknowledged", "acceptance_decided", "run_closed"],
+        )
+
     def test_approval_supports_reject_expire_and_exactly_once_consume(self):
         run_id = self.store.start_run("thread", "approval", "guarded_action")
         action_id = self.store.create_pending_action(

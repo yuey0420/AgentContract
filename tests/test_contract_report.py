@@ -55,6 +55,9 @@ class TestContractReport(unittest.TestCase):
                 report = generate_contract_report(make_contract(), thread_id="test-thread")
 
         self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["verification_result"], "passed")
+        self.assertEqual(report["acceptance_results"][0]["id"], "AC-001")
+        self.assertEqual(report["acceptance_results"][0]["verification_result"], "passed")
         self.assertEqual(report["summary"]["violations"], 0)
 
     @patch("pactflow.core.contracts.report.write_report", return_value="report.json")

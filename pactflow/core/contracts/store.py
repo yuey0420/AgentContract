@@ -11,6 +11,28 @@ from .models import ApprovalInfo, TaskContract
 
 def _canonical_contract_payload(contract: TaskContract) -> dict[str, Any]:
     payload = contract.model_dump(mode="json")
+    # New governance metadata is optional. Keep hashes for legacy contracts
+    # stable unless the caller explicitly supplied one of the new fields.
+    defaults = {
+        "task_id": None,
+        "task_version": "1.0",
+        "plan_version": "1.0",
+        "policy_version": "1.0",
+        "process_profile": "managed",
+        "auto_decompose": True,
+        "max_subtasks": 8,
+        "orchestrate_subtasks": True,
+        "repositories": [],
+        "planner_mode": "deterministic",
+    }
+    for field, default in defaults.items():
+        if getattr(contract, field, default) == default:
+            payload.pop(field, None)
+    for acceptance_payload, acceptance_rule in zip(
+        payload.get("acceptance", []), contract.acceptance
+    ):
+        if acceptance_rule.id is None:
+            acceptance_payload.pop("id", None)
     approval = payload.get("approval")
     if isinstance(approval, dict):
         approval["contract_hash"] = None

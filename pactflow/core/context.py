@@ -13,6 +13,16 @@ class AgentState(TypedDict, total=False):
     run_id: str
     execution_mode: str
     process_phase: str
+    lifecycle_status: str
+    task_id: str
+    task_version: str
+    plan_version: str
+    policy_version: str
+    process_profile: str
+    task_plan: list[dict]
+    effective_policy: dict
+    repositories: list[dict]
+    orchestrate_subtasks: bool
     process_report: dict
 
 def trim_context_messages(messages: list[BaseMessage], trigger_turns: int = 8, keep_turns: int = 4) -> tuple[list[BaseMessage], list[BaseMessage]]:
