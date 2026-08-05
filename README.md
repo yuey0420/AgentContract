@@ -10,7 +10,7 @@
 
 核心创新：把 Agent 的高风险工具调用从“提示词约束”升级为“结构化契约校验”，让执行前有边界、执行中可拦截、执行后可验收。
 
-Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 99 项通过
+Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 129 项通过
 
 [快速开始](#-快速开始) · [核心能力](#-核心能力) · [契约层-demo](#-契约层-demo) · [架构图](#-系统架构)
 
@@ -88,7 +88,9 @@ PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCla
 - **Contract as Runtime Policy**
   - active contract 存放在 `workspace/contracts/active/current.contract.json`
   - 使用 JSON + Pydantic 定义任务目标、权限范围、工具策略和验收规则
-  - 支持 `chat`、`guarded_action`、`managed_task` 三种执行模式
+  - 面向用户提供 `chat`、`development`、`audited` 三种运行模式，分别覆盖普通问答、模型驱动任务执行和高审计任务
+  - `managed` / `federated` 作为历史契约别名保留，分别兼容到 `development` / `audited`
+  - development 模式支持模型规划器生成结构化任务 DAG，并在校验后自动编排子任务
   - Shell、动态 Skill、记忆覆盖和删除/修改操作在无契约时要求一次性批准
 
 - **Tool Guard 工具调用守卫**
@@ -99,6 +101,10 @@ PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCla
 
 - **流程生命周期**
   - 每次请求创建独立 `run_id`，证据不会跨轮次混用
+  - 任务流程覆盖计划创建、计划确认、执行、验证、验收和关闭
+  - 模型规划器输出经过任务 ID、依赖关系、任务数量和契约边界校验；失败时回退到确定性规划
+  - 支持子任务顺序编排、失败处理、结果汇总和稳定验收 ID
+  - `audited` 模式支持文件基线、checkpoint、证据分级和变更对账
   - LangGraph 主路径为 `prepare → agent/tools → verify → finalize`
   - 高风险调用使用 LangGraph checkpoint 原地暂停，CLI 直接展示工具、脱敏参数、风险和契约条款并收集 Y/N
   - 批准后恢复同一个 `tool_call_id` 和原始参数，不要求 LLM 重新生成调用
@@ -169,8 +175,8 @@ PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCla
 
 ```bash
 # 克隆项目
-git clone https://github.com/yuey0420/AgentContract.git
-cd AgentContract
+git clone https://github.com/yuey0420/PactFlow.git
+cd PactFlow
 
 # 安装依赖并注册命令行工具（一步完成）
 pip install -e .
@@ -743,6 +749,8 @@ python tests/test_two_phase_skills.py
 | `test_contract_tool_node.py` | 统一工具网关、限制与一次性批准 | ✅ 通过 |
 | `test_runtime_store.py` | SQLite 运行、批准和证据账本 | ✅ 通过 |
 | `test_process_manager.py` | 三种模式和自动验收生命周期 | ✅ 通过 |
+| `test_process_governance.py` | 运行模式、模型规划器和能力评估 | ✅ 通过 |
+| `test_p0_regression.py` | P0 权限、审批、流程、规划器和证据回归场景 | ✅ 通过 |
 | `test_logger.py` | 审计日志递归脱敏 | ✅ 通过 |
 | `test_e2e_process_flow.py` | 完整流程、真实工具节点、审批和重启恢复 | ✅ 通过 |
 
@@ -751,11 +759,11 @@ python tests/test_two_phase_skills.py
 当前安全、契约、流程与运行存储接入后，本地完整回归测试通过：
 
 ```text
-Ran 99 tests
+Ran 129 tests
 OK
 ```
 
-测试覆盖路径逃逸、敏感环境清理、批准哈希、统一工具网关、一次性审批、运行级验收和 SQLite 任务恢复。
+测试覆盖路径逃逸、敏感环境清理、批准哈希、统一工具网关、一次性审批、运行级验收、SQLite 任务恢复、模型规划器校验和证据对账。P0 回归套件包含 15 个测试方法和 26 个具体场景。
 
 ### 两阶段测试报告
 

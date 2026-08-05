@@ -5,7 +5,10 @@
 ### 流程与安全升级
 
 - 所有 Agent 工具统一接入 `ContractToolNode`
-- LangGraph 增加 prepare / verify / finalize 流程节点和三种执行模式
+- LangGraph 增加 prepare / verify / finalize 流程节点和三种用户运行模式（`chat` / `development` / `audited`）
+- development 模式接入模型规划器，生成并校验结构化任务 DAG，支持子任务编排和确定性回退
+- 增加计划确认、任务验收、稳定验收 ID、文件基线、checkpoint、证据分级和变更对账
+- 增加能力评估的 requested / effective / enforcement 三层结果，以及多仓库依赖登记
 - 高风险工具调用支持 CLI 内联 Y/N 审批，不再要求用户手输动作编号
 - 使用 checkpoint 精确暂停和恢复原始 `tool_call_id` 与参数，不重新请求模型
 - 审批状态支持批准、拒绝、超时和一次性消费，并写入运行账本与审计日志
@@ -17,6 +20,7 @@
 - 审计日志增加递归脱敏，长期记忆降为低信任上下文数据
 - 计算器使用 AST 白名单替代 `eval`
 - 真实模型验收脚本覆盖批准、拒绝和契约越权三条路径
+- 新增 P0 回归测试套件，覆盖 15 个测试方法和 26 个权限、审批、流程、规划器与证据场景
 
 ### 新增
 
