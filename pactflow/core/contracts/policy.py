@@ -1,4 +1,5 @@
 import fnmatch
+import re
 
 from .models import ContractDecision, TaskContract
 from .store import compute_contract_hash
@@ -6,6 +7,15 @@ from .store import compute_contract_hash
 
 def _normalize_path(path: str) -> str:
     return path.replace("\\", "/").lstrip("/")
+
+
+def _unsafe_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return (
+        normalized.startswith("/")
+        or bool(re.match(r"^[A-Za-z]:/", normalized))
+        or any(part == ".." for part in normalized.split("/"))
+    )
 
 
 def _matches_any(value: str, patterns: list[str]) -> tuple[bool, str | None]:
@@ -61,6 +71,8 @@ def check_tool_allowed(contract: TaskContract, tool_name: str) -> ContractDecisi
 
 
 def check_write_path(contract: TaskContract, filepath: str) -> ContractDecision:
+    if _unsafe_path(filepath):
+        return deny(contract, "scope.path_safety", f"璺緞 {filepath} 鍖呭惈涓嶅畨鍏ㄨ矾寰勬垨璺ㄥ嚭鏍圭洰褰曞厓绱?")
     blocked, blocked_pattern = _matches_any(filepath, contract.scope.cannot_write)
     if blocked:
         return deny(
@@ -80,6 +92,8 @@ def check_write_path(contract: TaskContract, filepath: str) -> ContractDecision:
 
 
 def check_read_path(contract: TaskContract, filepath: str) -> ContractDecision:
+    if _unsafe_path(filepath):
+        return deny(contract, "scope.path_safety", f"璧勬簮 {filepath} 鍖呭惈涓嶅畨鍏ㄨ矾寰勬垨璺ㄥ嚭鏍圭洰褰曞厓绱?")
     if not contract.scope.can_read:
         return deny(contract, "scope.can_read", "active contract 未声明 can_read，默认不允许读取资源")
 
