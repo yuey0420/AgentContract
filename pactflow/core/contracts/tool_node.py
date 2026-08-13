@@ -55,7 +55,7 @@ def resolve_tool_intent(tool: BaseTool, args: dict[str, Any]) -> ToolIntent:
     capability = str(metadata.get("capability") or _TOOL_INTENTS.get(tool.name, ("external", None))[0])
     path_arg = metadata.get("resource_arg") or _TOOL_INTENTS.get(tool.name, ("external", None))[1]
     resource = metadata.get("resource") or _FIXED_RESOURCES.get(tool.name)
-    if args.get("mode") == "help" and metadata.get("help_resource"):
+    if args.get("mode") in {"manifest", "help"} and metadata.get("help_resource"):
         return ToolIntent(capability="read", resource=str(metadata["help_resource"]))
     if path_arg:
         resource = str(args.get(str(path_arg), ""))

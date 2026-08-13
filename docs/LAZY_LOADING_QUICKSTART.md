@@ -21,20 +21,29 @@ workspace/
 ```markdown
 name: my_first_skill
 description: 我的第一个技能，用于演示懒加载
+risk_level: low
+trust_level: trusted
+tags: [演示, automation]
 
 ## 使用方法
 
-1. 调用 mode='help' 查看此文档
-2. 调用 mode='run' command='your_command' 执行
+1. 优先通过 `discover_skills` 或 `mode='manifest'` 查看能力卡
+2. 低风险可信 Skill 可直接调用 `mode='run'` command='your_command'
+3. 高风险 Skill 需要先调用 `mode='help'`，再调用 `mode='run'`
 ```
 
 ### 3. 使用技能
 
 ```python
 from pactflow.core.skill_loader import load_dynamic_skills
+from pactflow.core.skill_loader import get_skill_discovery_tool
 
 # 获取所有技能（自动懒加载）
 tools = load_dynamic_skills()
+
+# 根据用户目标检索候选 Skill
+discovery = get_skill_discovery_tool()
+candidates = discovery.invoke({"query": "用户目标描述"})
 
 # Agent 会自动使用这些技能
 ```
@@ -73,7 +82,7 @@ clear_skill_cache()
 ### ✅ 最佳实践
 
 1. **保持技能文件精简**
-   - 将 `name` 和 `description` 放在前 50 行
+   - 将 `name`、`description` 和风险元数据放在前 50 行
    - 避免在元数据部分使用大量内容
 
 2. **合理使用缓存**

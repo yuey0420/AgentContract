@@ -7,6 +7,8 @@
 - 所有 Agent 工具统一接入 `ContractToolNode`
 - LangGraph 增加 prepare / verify / finalize 流程节点和三种用户运行模式（`chat` / `development` / `audited`）
 - development 模式接入模型规划器，生成并校验结构化任务 DAG，支持子任务编排和确定性回退
+- Skill 系统增加 Registry 元数据检索、Manifest 预览和按风险等级决定 `manifest` / `help` / `run` 门槛
+- 保留高风险 Skill 的 `help -> run` 强制边界，低风险可信 Skill 支持渐进式自动执行
 - 增加计划确认、任务验收、稳定验收 ID、文件基线、checkpoint、证据分级和变更对账
 - 增加能力评估的 requested / effective / enforcement 三层结果，以及多仓库依赖登记
 - 高风险工具调用支持 CLI 内联 Y/N 审批，不再要求用户手输动作编号

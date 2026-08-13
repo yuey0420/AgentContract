@@ -10,7 +10,7 @@
 
 核心创新：把 Agent 的高风险工具调用从“提示词约束”升级为“结构化契约校验”，让执行前有边界、执行中可拦截、执行后可验收。
 
-Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 129 项通过
+Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 132 项通过
 
 [快速开始](#-快速开始) · [核心能力](#-核心能力) · [契约层-demo](#-契约层-demo) · [架构图](#-系统架构)
 
@@ -36,7 +36,7 @@ PactFlow 是一个**契约约束下的透明可控 Agent Runtime**，重新定�
 
 ### 🔌 技能生态兼容
 
-PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenClaw / Claude Code 风格技能，并通过 help → run 两段式机制降低未知技能的执行风险。
+PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenClaw / Claude Code 风格技能，并通过 Skill Registry 渐进式发现、Manifest 预览和风险分级执行降低未知技能的执行风险。
 
 ### 🌟 核心能力
 
@@ -60,10 +60,12 @@ PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCla
   - 近期摘要 (SQLite)：每 MAX_TURNS 轮自动摘要，保留最近 KEEP_TURNS 轮
   - 上下文修剪：智能保留关键对话，防止 Token 爆炸
 
-- **两段式技能调用**
-  - `mode='help'`：查看完整说明书（SKILL.md）
-  - `mode='run'`：执行具体操作
-  - 支持反悔机制：看完说明书可以换工具
+- **渐进式 Skill 发现与风险分级执行**
+  - 启动时只读取 Skill Manifest 元数据，不加载完整 `SKILL.md`
+  - `discover_skills` 根据用户目标从 Registry 检索候选 Skill，检索结果只缩小范围，不授予执行权限
+  - `mode='manifest'` 查看轻量能力卡，包含用途、风险、可信级别、标签和依赖工具
+  - 低风险且可信的 Skill 可直接进入 `run`；中风险 Skill 先查看 Manifest；高风险和关键风险 Skill 必须完整 `help` 后才能 `run`
+  - 原有 `help → run` 仍作为高风险 Skill 的强制安全边界保留
 
 - **透明监控系统**
   - 5 类事件审计：`llm_input`, `tool_call`, `tool_result`, `ai_message`, `system_action`
@@ -158,7 +160,7 @@ PactFlow 兼容 `SKILL.md` 风格的技能组织方式，可复用部分 OpenCla
 
 - **动态加载**：自动扫描 `workspace/office/skills/` 目录
 - **SKILL.md 规范**：每个技能包含完整说明书
-- **兼容 SKILL.md 风格技能**：可复用部分 OpenClaw / Claude Code 风格技能，并在 `mode='run'` 时进入契约校验
+- **兼容 SKILL.md 风格技能**：可复用部分 OpenClaw / Claude Code 风格技能，候选 Skill 在 `manifest` / `help` / `run` 各阶段均经过契约校验
 - **推荐技能**：
   - `skill-creator`：用自然语言让 PactFlow 自己创建技能
   - `skill-vetter`：检查技能的安全性
@@ -619,6 +621,31 @@ curl "wttr.in/Beijing?format=3"
 - 天数（可选）
 ```
 
+#### Skill Manifest 元数据
+
+为了支持渐进式发现，建议在 `SKILL.md` 开头补充风险和能力元数据：
+
+```markdown
+---
+name: weather
+description: 获取天气预报
+risk_level: low
+trust_level: trusted
+tags: [天气, forecast]
+required_tools: [execute_office_shell]
+examples: [查询北京天气]
+---
+```
+
+Skill 的调用路径由风险等级决定：
+
+```text
+discover_skills → manifest → run        低风险或中风险 Skill
+discover_skills → manifest → help → run  高风险或关键风险 Skill
+```
+
+`discover_skills` 和 `manifest` 只负责能力发现与预览，最终是否允许执行仍由任务契约、工具策略和审批机制决定。
+
 ### 定时任务
 
 ```bash
@@ -745,7 +772,7 @@ python tests/test_two_phase_skills.py
 | `test_contract_policy.py` | 工具、路径、命令策略判断 | ✅ 通过 |
 | `test_contract_guard.py` | 契约守卫 allow/deny 逻辑 | ✅ 通过 |
 | `test_contract_report.py` | 契约验收报告生成 | ✅ 通过 |
-| `test_contract_skill_loader.py` | 动态 Skill help/run 契约约束 | ✅ 通过 |
+| `test_contract_skill_loader.py` | Skill Registry 检索、Manifest 与风险分级执行 | ✅ 通过 |
 | `test_contract_tool_node.py` | 统一工具网关、限制与一次性批准 | ✅ 通过 |
 | `test_runtime_store.py` | SQLite 运行、批准和证据账本 | ✅ 通过 |
 | `test_process_manager.py` | 三种模式和自动验收生命周期 | ✅ 通过 |
@@ -759,7 +786,7 @@ python tests/test_two_phase_skills.py
 当前安全、契约、流程与运行存储接入后，本地完整回归测试通过：
 
 ```text
-Ran 129 tests
+Ran 132 tests
 OK
 ```
 

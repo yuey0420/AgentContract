@@ -8,9 +8,16 @@ PactFlow 实现了**渐进式加载 + 缓存**的技能加载机制，显著提�
 
 ### 1. 懒加载 (Lazy Loading)
 
-- **启动时只扫描元数据**：只读取技能文件的前 50 行（name, description）
+- **启动时只扫描元数据**：只读取技能文件的前 50 行（name, description, risk_level, trust_level 等）
 - **首次调用时才加载完整内容**：只有当 Agent 真正需要使用某个技能时，才读取完整文件
 - **零延迟启动**：即使有数百个技能，启动时间也几乎为零
+
+### 2. Skill Registry 检索与风险门控
+
+- `discover_skills` 只检索轻量 Manifest，返回候选 Skill，不授予执行权限
+- `mode='manifest'` 查看用途、风险、可信级别、标签和依赖工具
+- 低风险可信 Skill 可直接执行，中风险 Skill 先看 Manifest，高风险 Skill 必须完整 `help` 后才能 `run`
+- `help -> run` 仍是高风险 Skill 的强制安全边界
 
 ### 2. 智能缓存
 
@@ -89,6 +96,10 @@ workspace/
 ```markdown
 name: website_deployer
 description: 一键部署网站到云服务器的自动化工具
+risk_level: high
+trust_level: verified
+tags: [部署, website]
+required_tools: [execute_office_shell]
 
 ## 详细说明
 
@@ -96,12 +107,13 @@ description: 一键部署网站到云服务器的自动化工具
 
 ## 使用方法
 
-1. 先调用 mode='help' 查看此文档
-2. 确认后调用 mode='run' command='deploy.sh'
+1. 先通过 `discover_skills` 或 `mode='manifest'` 确认能力和风险
+2. 高风险技能再调用 `mode='help'` 查看完整说明
+3. 契约允许后调用 `mode='run'` command='deploy.sh'
 ```
 
 **注意事项**：
-- `name` 和 `description` 必须在文件**前 50 行**内
+- `name`、`description` 和风险元数据必须在文件**前 50 行**内
 - 支持 `SKILL.md` 或 `README.md` 两种文件名
 - 文件编码必须是 **UTF-8**
 
@@ -116,7 +128,7 @@ Agent 启动
     ↓
 读取每个 SKILL.md 的前 50 行
     ↓
-提取 name 和 description
+提取 Manifest 元数据并建立 Registry
     ↓
 创建懒加载占位符工具
     ↓
@@ -128,16 +140,19 @@ Agent 启动
 ```
 用户发起请求
     ↓
-Agent 决定调用技能 X
+从 Skill Registry 检索候选 Skill
     ↓
-首次调用？
-    ├─ 是 → 读取完整 SKILL.md
-    │       ↓
-    │       缓存内容（LRU）
-    │       ↓
-    │       返回给 Agent
+查看 Manifest 并按风险决定是否完整 help
+    ↓
+低风险可信？ ─ 是 → 契约校验 → run
     │
-    └─ 否 → 从缓存直接返回
+    否
+    ↓
+中风险？ ─ 是 → Manifest 已查看 → 契约校验 → run
+    │
+    否
+    ↓
+读取完整 SKILL.md → 缓存内容（LRU）→ 契约校验 → run
 ```
 
 ### 缓存策略

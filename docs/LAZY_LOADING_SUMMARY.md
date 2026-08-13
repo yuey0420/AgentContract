@@ -33,9 +33,11 @@
 ```
 LazySkillLoader
 ├── _scan_skills()              # 扫描技能目录（轻量级）
-├── _extract_metadata()          # 提取 name/description（只读前50行）
+├── _extract_metadata()          # 提取 Manifest 元数据（只读前50行）
 ├── _load_skill_content()        # 加载完整内容（带LRU缓存）
 ├── _create_lazy_tool()         # 创建懒加载工具占位符
+├── retrieve_skill_manifests()   # 按目标检索候选 Skill
+├── get_skill_discovery_tool()   # 暴露 metadata-only Registry 检索
 ├── get_all_tools()             # 获取所有工具
 ├── get_tool_count()           # 获取技能数量
 └── clear_cache()              # 清除缓存
@@ -64,24 +66,22 @@ LazySkillLoader
 ┌─────────────────────────────────┐
 │ 1. 扫描 skills/ 目录         │
 │ 2. 读取每个 SKILL.md 前50行   │
-│ 3. 提取 name, description    │
-│ 4. 创建懒加载占位符工具        │
-│ 5. 注册到 Agent               │
+│ 3. 提取 Manifest 元数据       │
+│ 4. 建立 Registry 和检索索引    │
+│ 5. 创建懒加载占位符工具        │
+│ 6. 注册到 Agent               │
 └─────────────────────────────────┘
     ↓ (耗时: < 500ms for 100 skills)
 
 运行阶段：
 ┌─────────────────────────────────┐
-│ Agent 调用技能 X              │
+│ 检索候选 Skill                │
 │    ↓                          │
-│ 首次调用？                    │
-│ ├─ 是 → 读取完整内容          │
-│ │        ↓                   │
-│ │      缓存内容（LRU）        │
-│ │        ↓                   │
-│ │      返回给 Agent           │
-│ │                            │
-│ └─ 否 → 从缓存直接返回         │
+│ 查看 Manifest 和风险级别       │
+│    ↓                          │
+│ 低风险可信 → 直接 run          │
+│ 中风险 → Manifest 后 run       │
+│ 高风险 → help → 缓存 → run     │
 └─────────────────────────────────┘
 ```
 
@@ -229,7 +229,7 @@ clear_skill_cache()
 | 模式 | 应用位置 | 作用 |
 |------|---------|------|
 | **工厂模式** | `load_dynamic_skills()` | 批量生产工具对象 |
-| **策略模式** | `mode` 参数 | 根据 help/run 选择行为 |
+| **策略模式** | `mode` 参数 | 根据 manifest/help/run 选择行为 |
 | **闭包** | `lazy_runner()` | 捕获技能特定上下文 |
 | **代理模式** | 懒加载工具 | 延迟实际加载 |
 | **缓存模式** | `@lru_cache` | 提升访问性能 |
@@ -242,6 +242,9 @@ clear_skill_cache()
 - ✅ LRU 缓存
 - ✅ 元数据缓存
 - ✅ 热更新支持
+- ✅ Skill Registry 元数据检索
+- ✅ Manifest 预览和风险分级执行
+- ✅ 高风险 Skill 保留 help → run 强制边界
 - ✅ 完整测试覆盖
 
 ### 中期（规划中）
