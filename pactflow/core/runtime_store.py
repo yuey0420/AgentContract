@@ -3,6 +3,7 @@ import os
 import sqlite3
 import uuid
 import hashlib
+import fnmatch
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -216,6 +217,24 @@ class RuntimeStore:
                     rejected_at TEXT,
                     expired_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS approval_grants (
+                    grant_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    contract_hash TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    capability TEXT NOT NULL,
+                    resource_pattern TEXT NOT NULL,
+                    max_uses INTEGER NOT NULL,
+                    uses INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    revoked_at TEXT,
+                    approved_by TEXT NOT NULL,
+                    FOREIGN KEY(run_id) REFERENCES runs(run_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_approval_grants_match
+                    ON approval_grants(run_id, thread_id, contract_hash, tool_name, capability);
                 """
             )
             existing_columns = {
@@ -229,6 +248,11 @@ class RuntimeStore:
                 "rejected_by": "TEXT",
                 "rejected_at": "TEXT",
                 "expired_at": "TEXT",
+                "contract_hash": "TEXT",
+                "capability": "TEXT",
+                "resource": "TEXT",
+                "process_profile": "TEXT",
+                "effect": "TEXT",
             }
             for column, column_type in migrations.items():
                 if column not in existing_columns:
@@ -937,6 +961,10 @@ class RuntimeStore:
         risk_level: str | None = None,
         clause: str | None = None,
         reason: str | None = None,
+        capability: str | None = None,
+        resource: str | None = None,
+        process_profile: str | None = None,
+        effect: str | None = None,
     ) -> str:
         if tool_call_id:
             with self._connect() as conn:
@@ -959,8 +987,9 @@ class RuntimeStore:
                 """
                 INSERT INTO pending_actions
                 (action_id, run_id, thread_id, tool_name, args_json, action_hash, status, created_at, expires_at,
-                 tool_call_id, risk_level, clause, reason)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+                 tool_call_id, risk_level, clause, reason, contract_hash, capability, resource,
+                 process_profile, effect)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     action_id,
@@ -975,9 +1004,155 @@ class RuntimeStore:
                     risk_level,
                     clause,
                     reason,
+                    contract_hash,
+                    capability,
+                    resource,
+                    process_profile,
+                    effect,
                 ),
             )
         return action_id
+
+    def create_approval_grant(
+        self,
+        *,
+        run_id: str,
+        thread_id: str,
+        contract_hash: str,
+        tool_name: str,
+        capability: str,
+        resource_pattern: str,
+        approved_by: str,
+        ttl_minutes: int = 15,
+        max_uses: int = 20,
+    ) -> dict[str, Any]:
+        grant_id = uuid.uuid4().hex[:12]
+        created = datetime.now(timezone.utc)
+        expires = created + timedelta(minutes=ttl_minutes)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO approval_grants
+                (grant_id, run_id, thread_id, contract_hash, tool_name, capability,
+                 resource_pattern, max_uses, uses, created_at, expires_at, approved_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                """,
+                (
+                    grant_id, run_id, thread_id, contract_hash, tool_name, capability,
+                    resource_pattern, max(1, max_uses),
+                    created.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    expires.strftime("%Y-%m-%dT%H:%M:%SZ"), approved_by,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO run_events(run_id, ts, event, payload_json) VALUES (?, ?, 'approval_grant_created', ?)",
+                (
+                    run_id, _utc_now(), json.dumps({
+                        "grant_id": grant_id,
+                        "tool": tool_name,
+                        "capability": capability,
+                        "resource_pattern": resource_pattern,
+                        "max_uses": max(1, max_uses),
+                    }, ensure_ascii=False),
+                ),
+            )
+        return self.get_approval_grant(grant_id) or {"grant_id": grant_id}
+
+    def get_approval_grant(self, grant_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM approval_grants WHERE grant_id = ?", (grant_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_approval_grants(self, run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM approval_grants WHERE run_id = ? ORDER BY created_at, grant_id",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def revoke_approval_grant(self, grant_id: str) -> bool:
+        now = _utc_now()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT run_id FROM approval_grants WHERE grant_id = ? AND revoked_at IS NULL",
+                (grant_id,),
+            ).fetchone()
+            if not row:
+                return False
+            cursor = conn.execute(
+                "UPDATE approval_grants SET revoked_at = ? WHERE grant_id = ? AND revoked_at IS NULL",
+                (now, grant_id),
+            )
+            if cursor.rowcount == 1:
+                conn.execute(
+                    "INSERT INTO run_events(run_id, ts, event, payload_json) VALUES (?, ?, 'approval_grant_revoked', ?)",
+                    (row["run_id"], now, json.dumps({"grant_id": grant_id})),
+                )
+        return cursor.rowcount == 1
+
+    def consume_matching_approval_grant(
+        self,
+        *,
+        run_id: str,
+        thread_id: str,
+        contract_hash: str,
+        tool_name: str,
+        capability: str,
+        resource: str | None,
+    ) -> dict[str, Any] | None:
+        now = _utc_now()
+        normalized_resource = (resource or "").replace("\\", "/")
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT * FROM approval_grants
+                WHERE run_id = ? AND thread_id = ? AND contract_hash = ?
+                  AND tool_name = ? AND capability = ? AND revoked_at IS NULL
+                  AND expires_at > ? AND uses < max_uses
+                ORDER BY created_at, grant_id
+                """,
+                (run_id, thread_id, contract_hash, tool_name, capability, now),
+            ).fetchall()
+            row = next((
+                candidate for candidate in rows
+                if fnmatch.fnmatch(normalized_resource, candidate["resource_pattern"])
+            ), None)
+            if row is None:
+                conn.rollback()
+                return None
+            cursor = conn.execute(
+                """
+                UPDATE approval_grants SET uses = uses + 1
+                WHERE grant_id = ? AND revoked_at IS NULL AND expires_at > ? AND uses < max_uses
+                """,
+                (row["grant_id"], now),
+            )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return None
+            conn.execute(
+                "INSERT INTO run_events(run_id, ts, event, payload_json) VALUES (?, ?, 'approval_grant_consumed', ?)",
+                (
+                    run_id, now, json.dumps({
+                        "grant_id": row["grant_id"], "tool": tool_name,
+                        "capability": capability, "resource": resource,
+                    }, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+            result = dict(row)
+            result["uses"] = int(result["uses"]) + 1
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def get_action(self, action_id: str) -> dict[str, Any] | None:
         self.expire_actions(action_id=action_id)

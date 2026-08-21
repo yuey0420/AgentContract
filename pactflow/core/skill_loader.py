@@ -375,8 +375,14 @@ class LazySkillLoader:
                 "capability": "execute",
                 "resource_arg": "command",
                 "help_resource": f"skills/{skill_info['folder']}/SKILL.md",
+                "risk_level": skill_info.get("risk_level", "medium"),
                 "skill_risk_level": skill_info.get("risk_level", "medium"),
                 "skill_trust_level": skill_info.get("trust_level", "external"),
+                "result_trustworthiness": (
+                    "trusted"
+                    if skill_info.get("trust_level") in {"trusted", "verified"}
+                    else "untrusted"
+                ),
             },
         )
     

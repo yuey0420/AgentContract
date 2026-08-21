@@ -19,7 +19,6 @@ from ..config import STRICT_CONTRACTS
 _BASELINE_CONFIRMATION_TOOLS = {
     "delete_scheduled_task",
     "modify_scheduled_task",
-    "save_user_profile",
 }
 
 
@@ -45,6 +44,7 @@ def guard_tool_call(
     *,
     capability: str | None = None,
     resource: str | None = None,
+    effect: str | None = None,
 ) -> ContractDecision:
     try:
         contract = load_active_contract()
@@ -156,7 +156,16 @@ def guard_tool_call(
         _log_contract_event(thread_id, "contract_violation", decision, tool_name, args)
         return decision
 
-    if tool_name in contract.tool_policy.require_confirmation_for:
+    if tool_name in contract.tool_policy.high_risk_tools:
+        decision = require_confirmation(
+            contract,
+            "tool_policy.high_risk_tools",
+            f"工具 {tool_name} 被契约标记为高风险工具",
+        )
+        _log_contract_event(thread_id, "contract_confirmation_required", decision, tool_name, args)
+        return decision
+
+    if tool_name in contract.tool_policy.require_confirmation_for and effect != "read":
         decision = require_confirmation(
             contract,
             "tool_policy.require_confirmation_for",

@@ -12,6 +12,7 @@ from ..logger import audit_logger
 from ..execution import ExecutionContext, current_execution
 from ..runtime_store import runtime_store
 from .guard import format_contract_denial, guard_tool_call
+from .action_risk import classify_shell_effect
 from .instructions import InstructionBuilder, InstructionEnvelope, classify_tool_result
 from .models import ContractDecision, TaskContract
 from .security_policy import PolicyEvaluation, SecurityPolicyRuntime
@@ -103,6 +104,7 @@ class ContractToolNode:
         thread_id = config.get("configurable", {}).get("thread_id", "system_default")
         run_id = state.get("run_id")
         execution_mode = state.get("execution_mode", "chat")
+        process_profile = state.get("process_profile", "chat")
         plans: list[dict[str, Any]] = []
         approvals = ApprovalService(runtime_store)
 
@@ -130,6 +132,11 @@ class ContractToolNode:
                 continue
 
             intent = resolve_tool_intent(tool, args)
+            effect = (
+                classify_shell_effect(str(args.get("command", "")))
+                if tool_name == "execute_office_shell"
+                else intent.capability
+            )
             contract: TaskContract | None = None
             try:
                 contract = load_active_contract()
@@ -188,6 +195,7 @@ class ContractToolNode:
                     args,
                     capability=intent.capability,
                     resource=intent.resource,
+                    effect=effect,
                 )
                 if decision.decision == "allow" and contract and run_id:
                     decision = self._check_limits(contract, run_id, args, intent, decision)
@@ -202,10 +210,43 @@ class ContractToolNode:
                     )
 
             if decision.decision == "require_confirmation" and run_id:
+                grant = None
+                if self._scope_eligible(
+                    decision, instruction, process_profile, effect
+                ):
+                    grant = approvals.consume_matching_grant(
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        contract_hash=decision.contract_hash,
+                        tool_name=tool_name,
+                        capability=intent.capability,
+                        resource=intent.resource,
+                    )
+                if grant:
+                    runtime_store.update_instruction(
+                        instruction.instruction_id,
+                        status="approved",
+                        policy_decision="allow",
+                    )
+                    decision = ContractDecision(
+                        decision="allow",
+                        contract_id=decision.contract_id,
+                        contract_hash=decision.contract_hash,
+                        clause="approval.scoped_grant",
+                        reason="匹配的运行级范围授权已原子消费",
+                        risk_level=decision.risk_level,
+                    )
+
+            if decision.decision == "require_confirmation" and run_id:
                 runtime_store.update_instruction(
                     instruction.instruction_id,
                     status="awaiting_approval",
                     policy_decision=decision.decision,
+                )
+                risk_order = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+                approval_risk = max(
+                    [instruction.risk_level, decision.risk_level or "high"],
+                    key=lambda value: risk_order.get(value, 2),
                 )
                 action = approvals.request(
                     run_id=run_id,
@@ -214,9 +255,16 @@ class ContractToolNode:
                     tool_name=tool_name,
                     args=args,
                     contract_hash=decision.contract_hash,
-                    risk_level=decision.risk_level,
+                    risk_level=approval_risk,
                     clause=decision.clause,
                     reason=decision.reason,
+                    capability=intent.capability,
+                    resource=intent.resource,
+                    process_profile=process_profile,
+                    effect=effect,
+                )
+                scope_eligible = self._scope_eligible(
+                    decision, instruction, process_profile, effect
                 )
                 resolution = interrupt({
                     "type": "approval_required",
@@ -228,6 +276,10 @@ class ContractToolNode:
                     "clause": decision.clause,
                     "reason": decision.reason,
                     "expires_at": action.get("expires_at"),
+                    "approval_options": (
+                        ["once", "run_scope", "reject"]
+                        if scope_eligible else ["once", "reject"]
+                    ),
                 })
                 resumed_action_id = (
                     resolution.get("action_id") if isinstance(resolution, dict) else None
@@ -341,7 +393,7 @@ class ContractToolNode:
             intent = plan["intent"]
             contract = plan["contract"]
             result_trust, result_confidentiality = classify_tool_result(
-                tool, intent.capability
+                tool, intent.capability, args
             )
             audit_logger.log_event(
                 thread_id=thread_id,
@@ -571,3 +623,19 @@ class ContractToolNode:
                     risk_level=contract.risk_level,
                 )
         return allowed
+
+    @staticmethod
+    def _scope_eligible(
+        decision: ContractDecision,
+        instruction: InstructionEnvelope,
+        process_profile: str,
+        effect: str,
+    ) -> bool:
+        return bool(
+            decision.contract_hash
+            and process_profile in {"development", "audited"}
+            and instruction.risk_level != "critical"
+            and instruction.capability != "external"
+            and effect not in {"destructive", "external"}
+            and decision.clause not in {"scope.human_only", "security.critical_action"}
+        )

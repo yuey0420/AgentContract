@@ -7,7 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pactflow.core.contracts.models import TaskContract
-from pactflow.core.contracts.report import generate_contract_report
+from pactflow.core.contracts.report import approval_digest, generate_contract_report
 
 
 def make_contract():
@@ -34,6 +34,24 @@ def make_contract():
 
 
 class TestContractReport(unittest.TestCase):
+    def test_approval_digest_separates_prompts_reuse_and_rejections(self):
+        digest = approval_digest(
+            [
+                {"event": "approval_required"},
+                {"event": "approval_grant_consumed"},
+                {"event": "approval_grant_consumed"},
+            ],
+            [
+                {"status": "consumed"},
+                {"status": "rejected"},
+                {"status": "pending"},
+            ],
+        )
+        self.assertEqual(digest["approval_prompts"], 1)
+        self.assertEqual(digest["approval_grant_reuses"], 2)
+        self.assertEqual(digest["approval_rejections"], 1)
+        self.assertEqual(digest["pending_approvals"], 1)
+
     @patch("pactflow.core.contracts.report.write_report", return_value="report.json")
     @patch("pactflow.core.contracts.report._read_log_events")
     def test_report_passes_without_violation(self, mock_events, _mock_write):

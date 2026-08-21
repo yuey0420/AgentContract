@@ -120,6 +120,64 @@ class TestRuntimeStore(unittest.TestCase):
             approved.approval.contract_hash,
         ))
 
+    def test_scoped_grant_is_hash_resource_use_and_revocation_bounded(self):
+        run_id = self.store.start_run("thread", "scope", "managed_task")
+        grant = self.store.create_approval_grant(
+            run_id=run_id,
+            thread_id="thread",
+            contract_hash="sha256:one",
+            tool_name="write_office_file",
+            capability="write",
+            resource_pattern="reports/**",
+            approved_by="owner",
+            max_uses=2,
+        )
+        common = {
+            "run_id": run_id,
+            "thread_id": "thread",
+            "contract_hash": "sha256:one",
+            "tool_name": "write_office_file",
+            "capability": "write",
+        }
+        self.assertIsNotNone(self.store.consume_matching_approval_grant(
+            **common, resource="reports/a.md"
+        ))
+        self.assertIsNone(self.store.consume_matching_approval_grant(
+            **{**common, "contract_hash": "sha256:two"}, resource="reports/b.md"
+        ))
+        self.assertIsNone(self.store.consume_matching_approval_grant(
+            **common, resource="private/b.md"
+        ))
+        self.assertIsNotNone(self.store.consume_matching_approval_grant(
+            **common, resource="reports/b.md"
+        ))
+        self.assertIsNone(self.store.consume_matching_approval_grant(
+            **common, resource="reports/c.md"
+        ))
+        self.assertTrue(self.store.revoke_approval_grant(grant["grant_id"]))
+        self.assertIsNotNone(self.store.get_approval_grant(grant["grant_id"])["revoked_at"])
+
+    def test_expired_scoped_grant_does_not_match(self):
+        run_id = self.store.start_run("thread", "scope", "managed_task")
+        self.store.create_approval_grant(
+            run_id=run_id,
+            thread_id="thread",
+            contract_hash="hash",
+            tool_name="tool",
+            capability="write",
+            resource_pattern="*",
+            approved_by="owner",
+            ttl_minutes=-1,
+        )
+        self.assertIsNone(self.store.consume_matching_approval_grant(
+            run_id=run_id,
+            thread_id="thread",
+            contract_hash="hash",
+            tool_name="tool",
+            capability="write",
+            resource="anything",
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

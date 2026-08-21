@@ -172,7 +172,9 @@ async def async_main():
             cprint(f"  \033[38;5;250m│ 条款：{approval.get('clause') or 'runtime approval'}\033[0m")
             cprint(f"  \033[38;5;250m│ 原因：{approval.get('reason')}\033[0m")
             cprint(f"  \033[38;5;250m│ 有效期至：{approval.get('expires_at')}\033[0m")
-            cprint("  \033[38;5;214m└─ 是否执行？请输入 Y/N ───────────\033[0m")
+            options = approval.get("approval_options") or ["once", "reject"]
+            prompt = "Y=批准一次 / A=本次运行批准同类动作 / N=拒绝" if "run_scope" in options else "Y=批准一次 / N=拒绝"
+            cprint(f"  \033[38;5;214m└─ {prompt} ───────────\033[0m")
 
         async def expire_and_resume(approval):
             expires_at = datetime.strptime(
@@ -344,11 +346,23 @@ async def async_main():
                                 if result.status == "approved"
                                 else f"审批未生效（状态：{result.status}），原工具调用不会执行"
                             )
+                        elif normalized in {"a", "all", "scope"} and "run_scope" in (
+                            approval.get("approval_options") or []
+                        ):
+                            result = service.approve_scope(action_id, "local_user")
+                            label = (
+                                "已批准当前操作，并授权本次运行内匹配的同类动作"
+                                if result.status == "approved"
+                                else f"审批未生效（状态：{result.status}），原工具调用不会执行"
+                            )
                         elif normalized in {"n", "no"}:
                             result = service.reject(action_id, "local_user")
                             label = "已拒绝，原工具调用不会执行"
                         else:
-                            cprint("  \033[31m请输入 Y（批准）或 N（拒绝）。\033[0m")
+                            allowed = "Y、A 或 N" if "run_scope" in (
+                                approval.get("approval_options") or []
+                            ) else "Y 或 N"
+                            cprint(f"  \033[31m请输入 {allowed}。\033[0m")
                             continue
 
                         spinner.pending_approval = None

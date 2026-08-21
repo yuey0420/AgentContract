@@ -7,6 +7,8 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field
 
+from .action_risk import classify_shell_effect, shell_risk_level
+
 
 Trustworthiness = Literal["trusted", "unknown", "untrusted"]
 Confidentiality = Literal["public", "internal", "confidential", "restricted"]
@@ -92,19 +94,34 @@ def _directly_references(args: dict[str, Any], content: str) -> bool:
     return False
 
 
-def classify_tool_result(tool: BaseTool, capability: str) -> tuple[Trustworthiness, Confidentiality]:
+def classify_tool_result(
+    tool: BaseTool,
+    capability: str,
+    args: dict[str, Any] | None = None,
+) -> tuple[Trustworthiness, Confidentiality]:
     metadata = getattr(tool, "metadata", None) or {}
     trust = metadata.get("result_trustworthiness")
     confidentiality = metadata.get("result_confidentiality")
 
     if trust not in _TRUST_ORDER:
-        trust = {
-            "pure": "trusted",
-            "read": "unknown",
-            "write": "trusted",
-            "execute": "unknown",
-            "external": "untrusted",
-        }.get(capability, "unknown")
+        if tool.name in {
+            "list_office_files", "read_office_file", "read_user_profile",
+            "list_scheduled_tasks",
+        }:
+            trust = "trusted"
+        elif (
+            tool.name == "execute_office_shell"
+            and classify_shell_effect(str((args or {}).get("command", ""))) == "read"
+        ):
+            trust = "trusted"
+        else:
+            trust = {
+                "pure": "trusted",
+                "read": "unknown",
+                "write": "trusted",
+                "execute": "unknown",
+                "external": "untrusted",
+            }.get(capability, "unknown")
     if confidentiality not in _CONFIDENTIALITY_ORDER:
         if tool.name == "read_user_profile":
             confidentiality = "confidential"
@@ -166,7 +183,10 @@ class InstructionBuilder:
             _CONFIDENTIALITY_ORDER,
             "public",
         )
-        risk = metadata.get("risk_level") or _DEFAULT_RISK.get(capability, "high")
+        risk = metadata.get("risk_level") or metadata.get("skill_risk_level")
+        if tool.name == "execute_office_shell":
+            risk = shell_risk_level(str(args.get("command", "")))
+        risk = risk or _DEFAULT_RISK.get(capability, "high")
         if risk not in {"low", "medium", "high", "critical"}:
             risk = "high"
         authority = metadata.get("authority") or "model"

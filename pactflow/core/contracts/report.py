@@ -40,6 +40,24 @@ def _file_exists(path: str | None) -> bool:
     return target.exists()
 
 
+def approval_digest(
+    events: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+) -> dict[str, int]:
+    return {
+        "approval_prompts": sum(event.get("event") == "approval_required" for event in events),
+        "approvals": sum(action.get("status") == "consumed" for action in actions),
+        "approval_rejections": sum(action.get("status") == "rejected" for action in actions),
+        "approval_expirations": sum(action.get("status") == "expired" for action in actions),
+        "approval_grant_reuses": sum(
+            event.get("event") == "approval_grant_consumed" for event in events
+        ),
+        "pending_approvals": sum(
+            action.get("status") in {"pending", "approved"} for action in actions
+        ),
+    }
+
+
 def generate_contract_report(
     contract: TaskContract,
     thread_id: str = "local_geek_master",
@@ -122,6 +140,7 @@ def generate_contract_report(
             "violations": len(violations),
             "denied": len(denied),
             "requires_confirmation": len(confirmations),
+            **(approval_digest(events, run_actions) if run_id else {}),
         },
         "acceptance_results": acceptance_results,
     }

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any
 
 from .logger import audit_logger
@@ -30,6 +31,10 @@ class ApprovalService:
         risk_level: str | None,
         clause: str | None,
         reason: str,
+        capability: str | None = None,
+        resource: str | None = None,
+        process_profile: str | None = None,
+        effect: str | None = None,
         ttl_minutes: int = 15,
     ) -> dict[str, Any]:
         action_id = self.store.create_pending_action(
@@ -43,6 +48,10 @@ class ApprovalService:
             risk_level=risk_level or "high",
             clause=clause,
             reason=reason,
+            capability=capability,
+            resource=resource,
+            process_profile=process_profile,
+            effect=effect,
         )
         action = self.store.get_action(action_id)
         if action and action["status"] == "pending":
@@ -59,6 +68,82 @@ class ApprovalService:
                     "clause": clause,
                 })
         return action or {"action_id": action_id, "status": "missing"}
+
+    def approve_scope(
+        self,
+        action_id: str,
+        actor: str = "local_user",
+    ) -> ApprovalResult:
+        result = self.approve(action_id, actor)
+        action = result.action
+        if result.status != "approved" or not action:
+            return result
+        if not self.scope_eligible(action):
+            return result
+        profile = str(action.get("process_profile") or "development")
+        self.store.create_approval_grant(
+            run_id=str(action["run_id"]),
+            thread_id=str(action["thread_id"]),
+            contract_hash=str(action["contract_hash"]),
+            tool_name=str(action["tool_name"]),
+            capability=str(action["capability"]),
+            resource_pattern=self._resource_pattern(
+                str(action.get("resource") or ""), profile
+            ),
+            approved_by=actor,
+            ttl_minutes=15,
+            max_uses=5 if profile == "audited" else 20,
+        )
+        return result
+
+    def consume_matching_grant(
+        self,
+        *,
+        run_id: str,
+        thread_id: str,
+        contract_hash: str | None,
+        tool_name: str,
+        capability: str,
+        resource: str | None,
+    ) -> dict[str, Any] | None:
+        if not contract_hash:
+            return None
+        return self.store.consume_matching_approval_grant(
+            run_id=run_id,
+            thread_id=thread_id,
+            contract_hash=contract_hash,
+            tool_name=tool_name,
+            capability=capability,
+            resource=resource,
+        )
+
+    @staticmethod
+    def scope_eligible(action: dict[str, Any]) -> bool:
+        risk = str(action.get("risk_level") or "high")
+        clause = str(action.get("clause") or "")
+        profile = str(action.get("process_profile") or "chat")
+        capability = str(action.get("capability") or "")
+        effect = str(action.get("effect") or capability)
+        return bool(
+            action.get("contract_hash")
+            and profile in {"development", "audited"}
+            and risk != "critical"
+            and capability != "external"
+            and effect not in {"destructive", "external"}
+            and clause not in {"scope.human_only", "security.critical_action"}
+        )
+
+    @staticmethod
+    def _resource_pattern(resource: str, profile: str) -> str:
+        normalized = resource.replace("\\", "/")
+        if profile == "audited" or not normalized:
+            return normalized
+        if "/" in normalized and not normalized.startswith(("http://", "https://")):
+            parent = str(PurePosixPath(normalized).parent)
+            return f"{parent}/**" if parent not in {"", "."} else "*"
+        if " " in normalized:
+            return normalized.split(" ", 1)[0] + " *"
+        return normalized
 
     def approve(self, action_id: str, actor: str = "local_user") -> ApprovalResult:
         changed = self.store.approve_pending_action(action_id, actor)

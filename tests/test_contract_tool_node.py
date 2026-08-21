@@ -10,6 +10,7 @@ from pactflow.core.contracts.models import ContractDecision, TaskContract
 from pactflow.core.contracts.store import approve_contract
 from pactflow.core.contracts.tool_node import ContractToolNode
 from pactflow.core.runtime_store import RuntimeStore
+from pactflow.core.approval import ApprovalService
 
 
 class TestContractToolNode(unittest.TestCase):
@@ -162,6 +163,77 @@ class TestContractToolNode(unittest.TestCase):
             ContractToolNode([failing_tool])(state, self.config)
 
         self.assertEqual(self.store.get_run_events(self.run_id)[-1]["event"], "tool_failed")
+
+    @patch("pactflow.core.contracts.tool_node.load_active_contract", return_value=None)
+    @patch("pactflow.core.contracts.tool_node.guard_tool_call")
+    def test_matching_scoped_grant_skips_interrupt(self, mock_guard, _mock_load):
+        decision = ContractDecision(
+            decision="require_confirmation",
+            contract_id="contract-1",
+            contract_hash="sha256:test",
+            clause="tool_policy.high_risk_tools",
+            reason="confirm",
+            risk_level="high",
+        )
+        mock_guard.return_value = decision
+        self.state["process_profile"] = "development"
+        self.store.create_approval_grant(
+            run_id=self.run_id,
+            thread_id="thread-1",
+            contract_hash="sha256:test",
+            tool_name="sample_tool",
+            capability="external",
+            resource_pattern="",
+            approved_by="tester",
+        )
+        # External capabilities are never scope eligible, even with a forged grant.
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store), \
+             patch("pactflow.core.contracts.tool_node.interrupt", side_effect=RuntimeError("paused")):
+            with self.assertRaisesRegex(RuntimeError, "paused"):
+                self.node(self.state, self.config)
+
+        self.node.tools["sample_tool"].metadata = {
+            "capability": "write",
+            "resource": "reports/a.md",
+        }
+        self.store.create_approval_grant(
+            run_id=self.run_id,
+            thread_id="thread-1",
+            contract_hash="sha256:test",
+            tool_name="sample_tool",
+            capability="write",
+            resource_pattern="reports/**",
+            approved_by="tester",
+        )
+        self.state["messages"] = [AIMessage(content="", tool_calls=[{
+            "name": "sample_tool", "args": {"value": "y"},
+            "id": "call-scope", "type": "tool_call",
+        }])]
+        with patch("pactflow.core.contracts.tool_node.runtime_store", self.store), \
+             patch("pactflow.core.contracts.tool_node.interrupt") as mock_interrupt:
+            result = self.node(self.state, self.config)
+        mock_interrupt.assert_not_called()
+        self.assertEqual(result["messages"][0].content, "ok:y")
+
+    def test_critical_action_cannot_create_scope(self):
+        action_id = self.store.create_pending_action(
+            self.run_id,
+            "thread-1",
+            "dangerous",
+            {},
+            "sha256:test",
+            tool_call_id="critical-call",
+            risk_level="critical",
+            clause="security.critical_action",
+            capability="execute",
+            resource="rm data.txt",
+            process_profile="development",
+            effect="destructive",
+        )
+        service = ApprovalService(self.store)
+        result = service.approve_scope(action_id, "tester")
+        self.assertEqual(result.status, "approved")
+        self.assertEqual(self.store.list_approval_grants(self.run_id), [])
 
 
 if __name__ == "__main__":

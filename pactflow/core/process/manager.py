@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..contracts.report import generate_contract_report
+from ..contracts.report import approval_digest, generate_contract_report
 from ..contracts.store import compute_contract_hash, load_active_contract, write_report
 from ..config import OFFICE_DIR
 from ..logger import audit_logger
@@ -312,6 +312,7 @@ class ProcessManager:
                     "tool_calls": sum(event.get("event") == "tool_succeeded" for event in events),
                     "failures": len(failed),
                     "pending_approvals": len(pending),
+                    **approval_digest(events, run_actions),
                 },
                 "acceptance_results": [],
             }
@@ -321,6 +322,10 @@ class ProcessManager:
                 "inconclusive": "inconclusive",
             }[report["status"]]
             write_report(f"run-{run_id}", report, run_id=run_id)
+
+        events = self.store.get_run_events(run_id)
+        run_actions = self.store.list_run_actions(run_id)
+        report.setdefault("summary", {}).update(approval_digest(events, run_actions))
 
         reconciliation = None
         baseline = self.store.get_baseline(run_id)

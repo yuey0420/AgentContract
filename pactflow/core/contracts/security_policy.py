@@ -64,7 +64,13 @@ class UntrustedSideEffectPolicy:
         if (
             instruction.reference_tool_ids
             and instruction.capability in {"write", "execute", "external"}
-            and instruction.trustworthiness in {"unknown", "untrusted"}
+            and (
+                instruction.trustworthiness == "untrusted"
+                or (
+                    instruction.trustworthiness == "unknown"
+                    and instruction.capability == "external"
+                )
+            )
         ):
             return PolicyFinding(
                 policy=self.name,

@@ -10,7 +10,13 @@ from pactflow.core.contracts.models import TaskContract
 from pactflow.core.contracts.store import approve_contract
 
 
-def make_contract(status="approved"):
+def make_contract(
+    status="approved",
+    *,
+    can_execute=None,
+    high_risk_tools=None,
+    require_confirmation_for=None,
+):
     contract = TaskContract.model_validate({
         "contract_version": "0.1",
         "id": "contract-guard",
@@ -21,13 +27,14 @@ def make_contract(status="approved"):
         "scope": {
             "can_write": ["reports/**"],
             "cannot_write": ["skills/**"],
-            "can_execute": ["python"],
+            "can_execute": can_execute or ["python"],
             "cannot_execute": ["rm -rf"],
         },
         "tool_policy": {
             "allowed_tools": ["write_office_file", "execute_office_shell"],
             "blocked_tools": [],
-            "require_confirmation_for": [],
+            "high_risk_tools": high_risk_tools or [],
+            "require_confirmation_for": require_confirmation_for or [],
         },
     })
     return approve_contract(contract, "test-owner") if status == "approved" else contract
@@ -98,6 +105,30 @@ class TestContractGuard(unittest.TestCase):
         decision = guard_tool_call("test-thread", "execute_office_shell", {"command": "rm -rf tmp"})
         self.assertEqual(decision.decision, "deny")
         self.assertEqual(decision.clause, "scope.cannot_execute")
+
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    def test_high_risk_tools_require_confirmation(self, _mock_log):
+        contract = make_contract(high_risk_tools=["write_office_file"])
+        with patch("pactflow.core.contracts.guard.load_active_contract", return_value=contract):
+            decision = guard_tool_call(
+                "test-thread", "write_office_file", {"filepath": "reports/a.md"},
+                capability="write", resource="reports/a.md",
+            )
+        self.assertEqual(decision.decision, "require_confirmation")
+        self.assertEqual(decision.clause, "tool_policy.high_risk_tools")
+
+    @patch("pactflow.core.contracts.guard.audit_logger.log_event")
+    def test_read_only_shell_skips_coarse_tool_confirmation(self, _mock_log):
+        contract = make_contract(
+            can_execute=["git status"],
+            require_confirmation_for=["execute_office_shell"],
+        )
+        with patch("pactflow.core.contracts.guard.load_active_contract", return_value=contract):
+            decision = guard_tool_call(
+                "test-thread", "execute_office_shell", {"command": "git status"},
+                capability="execute", resource="git status", effect="read",
+            )
+        self.assertEqual(decision.decision, "allow")
 
 
 if __name__ == "__main__":
