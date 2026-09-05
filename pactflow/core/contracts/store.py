@@ -116,6 +116,14 @@ def write_report(contract_id: str, report: dict[str, Any], run_id: str | None = 
     safe_run = "".join(c for c in (run_id or "") if c.isalnum() or c in "-_")
     filename = f"{safe_id}.{safe_run}.report.json" if safe_run else f"{safe_id}.report.json"
     path = os.path.join(CONTRACT_REPORTS_DIR, filename)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    fd, temporary = tempfile.mkstemp(prefix="report-", suffix=".tmp", dir=CONTRACT_REPORTS_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     return path

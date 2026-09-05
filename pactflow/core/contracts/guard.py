@@ -1,7 +1,7 @@
 from typing import Any
 
 from ..logger import audit_logger
-from .models import ContractDecision
+from .models import ContractDecision, TaskContract
 from .policy import (
     allow,
     check_read_path,
@@ -45,9 +45,10 @@ def guard_tool_call(
     capability: str | None = None,
     resource: str | None = None,
     effect: str | None = None,
+    contract_snapshot: TaskContract | None = None,
 ) -> ContractDecision:
     try:
-        contract = load_active_contract()
+        contract = contract_snapshot or load_active_contract()
     except Exception as e:
         decision = ContractDecision(
             decision="deny",
@@ -128,23 +129,18 @@ def guard_tool_call(
         _log_contract_event(thread_id, "contract_violation", decision, tool_name, args)
         return decision
 
-    decision = check_tool_allowed(contract, tool_name)
-    if decision.decision != "allow":
-        _log_contract_event(thread_id, "contract_violation", decision, tool_name, args)
-        return decision
-
+    decisions = [check_tool_allowed(contract, tool_name)]
     boundary_decision = check_resource_boundary(contract, resource)
-    if boundary_decision is not None and boundary_decision.decision != "allow":
-        event = "contract_confirmation_required" if boundary_decision.decision == "require_confirmation" else "contract_violation"
-        _log_contract_event(thread_id, event, boundary_decision, tool_name, args)
-        return boundary_decision
+    if boundary_decision is not None:
+        decisions.append(boundary_decision)
 
     if capability == "read":
         decision = check_read_path(contract, resource or str(args.get("filepath", args.get("sub_dir", ""))))
     elif capability == "write":
         decision = check_write_path(contract, resource or str(args.get("filepath", "")))
     elif capability == "execute":
-        decision = check_shell_command(contract, str(args.get("command", "")))
+        command = "check:" + str(args.get("check_id", "")) if tool_name == "run_office_check" else str(args.get("command", ""))
+        decision = check_shell_command(contract, command)
     elif tool_name == "write_office_file":
         decision = check_write_path(contract, str(args.get("filepath", "")))
     elif tool_name == "execute_office_shell":
@@ -152,9 +148,7 @@ def guard_tool_call(
     else:
         decision = allow(contract, "tool_policy.allowed_tools", f"工具 {tool_name} 通过通用契约校验")
 
-    if decision.decision != "allow":
-        _log_contract_event(thread_id, "contract_violation", decision, tool_name, args)
-        return decision
+    decisions.append(decision)
 
     if tool_name in contract.tool_policy.high_risk_tools:
         decision = require_confirmation(
@@ -162,8 +156,7 @@ def guard_tool_call(
             "tool_policy.high_risk_tools",
             f"工具 {tool_name} 被契约标记为高风险工具",
         )
-        _log_contract_event(thread_id, "contract_confirmation_required", decision, tool_name, args)
-        return decision
+        decisions.append(decision)
 
     if tool_name in contract.tool_policy.require_confirmation_for and effect != "read":
         decision = require_confirmation(
@@ -171,10 +164,14 @@ def guard_tool_call(
             "tool_policy.require_confirmation_for",
             f"工具 {tool_name} 属于需要人工确认的高风险工具",
         )
-        _log_contract_event(thread_id, "contract_confirmation_required", decision, tool_name, args)
-        return decision
+        decisions.append(decision)
 
-    _log_contract_event(thread_id, "contract_check", decision, tool_name, args)
+    priority = {"allow": 0, "require_confirmation": 1, "deny": 2}
+    decision = max(decisions, key=lambda item: priority[item.decision]).model_copy(deep=True)
+    decision.matched_clauses = list(dict.fromkeys(item.clause for item in decisions if item.clause))
+    event = {"allow": "contract_check", "deny": "contract_violation",
+             "require_confirmation": "contract_confirmation_required"}[decision.decision]
+    _log_contract_event(thread_id, event, decision, tool_name, args)
     return decision
 
 

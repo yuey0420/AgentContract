@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import os
+import json
 from pathlib import Path
 from typing import Any
 
@@ -12,21 +13,46 @@ from typing import Any
 def capture_filesystem_snapshot(root_path: str, *, max_files: int = 5000) -> dict[str, Any]:
     root = Path(root_path).resolve(strict=False)
     files: dict[str, Any] = {}
+    gaps: list[dict] = []
+    truncated = False
     if not root.exists():
-        return {"root": str(root), "files": files, "truncated": False}
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        try:
-            relative = path.relative_to(root).as_posix()
-            data = path.read_bytes()
-        except (OSError, ValueError):
-            continue
-        files[relative] = {
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "size": len(data),
-        }
-        if len(files) >= max_files:
-            return {"root": str(root), "files": files, "truncated": True}
-    return {"root": str(root), "files": files, "truncated": False}
+        gaps.append({"path": str(root), "reason": "root_missing"})
+    def onerror(error):
+        gaps.append({"path": error.filename, "reason": str(error)})
+
+    for directory, dirs, names in os.walk(root, followlinks=False, onerror=onerror):
+        for name in list(dirs):
+            path = Path(directory) / name
+            try:
+                path.resolve().relative_to(root)
+                if path.is_symlink():
+                    raise ValueError("symlink_directory")
+            except (OSError, ValueError) as error:
+                dirs.remove(name)
+                gaps.append({"path": str(path), "reason": str(error)})
+        for name in sorted(names):
+            path = Path(directory) / name
+            try:
+                path.resolve().relative_to(root)
+                if path.is_symlink():
+                    raise ValueError("symlink_file")
+                if len(files) >= max_files:
+                    truncated = True
+                    break
+                relative = path.relative_to(root).as_posix()
+                data = path.read_bytes()
+                files[relative] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+            except (OSError, ValueError) as error:
+                gaps.append({"path": str(path), "reason": str(error)})
+        if truncated:
+            break
+    return {"root": str(root), "files": files, "truncated": truncated,
+            "coverage": "limited" if truncated or gaps else "complete", "coverage_gaps": gaps,
+            "recovery": "hashes_only", "excluded": []}
+
+
+def snapshot_fingerprint(snapshot: dict) -> str:
+    return "sha256:" + hashlib.sha256(json.dumps(snapshot.get("files", {}), sort_keys=True).encode()).hexdigest()
 
 
 def diff_filesystem_snapshots(before: dict[str, Any], after: dict[str, Any]) -> dict[str, list[str]]:
@@ -35,7 +61,9 @@ def diff_filesystem_snapshots(before: dict[str, Any], after: dict[str, Any]) -> 
     added = sorted(path for path in new if path not in old)
     deleted = sorted(path for path in old if path not in new)
     modified = sorted(path for path in new if path in old and new[path] != old[path])
-    return {"added": added, "modified": modified, "deleted": deleted}
+    return {"added": added, "modified": modified, "deleted": deleted,
+            "coverage_gaps": before.get("coverage_gaps", []) + after.get("coverage_gaps", []),
+            "coverage": "limited" if before.get("truncated") or after.get("truncated") or before.get("coverage") == "limited" or after.get("coverage") == "limited" else "complete"}
 
 
 def reconcile_changes(
@@ -65,6 +93,7 @@ def reconcile_changes(
         "scope_violations": violations,
         "unreported": unreported,
         "categories": categories,
-        "status": "passed" if not violations and not unreported else "needs_review",
+        "coverage": diff.get("coverage", "complete"),
+        "coverage_gaps": diff.get("coverage_gaps", []),
+        "status": "passed" if not violations and not unreported and diff.get("coverage") != "limited" else "needs_review",
     }
-

@@ -1,0 +1,39 @@
+{
+  "contract_version": "2.0",
+  "id": "v3-local-scenario",
+  "owner": "local_user",
+  "objective": "Repair the demo result and verify it locally",
+  "status": "draft",
+  "process_profile": "development",
+  "inputs": {
+    "project_id": "demo",
+    "work_item_id": "demo-result",
+    "planner_mode": "deterministic",
+    "acceptance_required": false,
+    "max_repairs": 3,
+    "scenarios": [
+      {"id": "SC-RESULT", "description": "The result satisfies the demo checker", "check_id": "demo-result"}
+    ],
+    "checks": {
+      "demo-result": {
+        "argv": ["python", "check_result.py"],
+        "cwd": "products/demo",
+        "timeout": 30,
+        "version": "1"
+      }
+    }
+  },
+  "scope": {
+    "can_read": ["products/demo/**"],
+    "can_write": ["products/demo/result.txt"],
+    "can_execute": ["check:demo-result"],
+    "cannot_write": ["products/demo/check_result.py"],
+    "autonomous": ["products/demo/result.txt"]
+  },
+  "tool_policy": {
+    "allowed_tools": ["read_office_file", "write_office_file", "patch_office_file", "run_office_check"]
+  },
+  "limits": {"max_tool_calls": 20, "max_written_files": 1, "max_file_bytes": 65536, "max_shell_seconds": 30},
+  "acceptance": [{"id": "AC-RESULT", "type": "file_exists", "path": "products/demo/result.txt"}],
+  "deliverables": ["products/demo/result.txt"]
+}

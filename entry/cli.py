@@ -273,6 +273,60 @@ def approve_action(
         raise typer.Exit(code=1)
     console.print(f"[bold green]已批准一次性操作 {action_id}。[/bold green]")
 
+@app.command("run-status")
+def run_status(run_id: str):
+    from pactflow.core.process import process_manager
+    console.print(process_manager.prepare_resume(run_id))
+
+
+@app.command("workspace-import")
+def workspace_import(source: str, project_id: str):
+    from pactflow.core.config import OFFICE_DIR
+    from pactflow.core.process.workspace import import_project_copy
+    from pactflow.core.runtime_store import runtime_store
+    try:
+        binding = import_project_copy(runtime_store, source, OFFICE_DIR, project_id)
+        console.print({key: binding[key] for key in ("project_id", "root", "office_relative_root", "mode")})
+    except (OSError, ValueError) as error:
+        console.print(str(error))
+        raise typer.Exit(1)
+
+
+@app.command("baseline-restore")
+def baseline_restore(run_id: str, filepath: str, expected_hash: str):
+    from pathlib import Path
+    from pactflow.core.process.workspace import restore_baseline_file
+    from pactflow.core.runtime_store import runtime_store
+    baseline = runtime_store.get_baseline(run_id)
+    if not baseline:
+        raise typer.BadParameter("Run has no baseline")
+    try:
+        result = restore_baseline_file(baseline["snapshot"], filepath,
+                                       Path(runtime_store.db_path).parent / "content_objects", expected_hash)
+        runtime_store.append_run_event(run_id, "workspace.human_restored", result)
+        console.print(result)
+    except (OSError, ValueError) as error:
+        console.print(str(error))
+        raise typer.Exit(1)
+
+
+@app.command("decisions")
+def decisions(run_id: str):
+    from pactflow.core.runtime_store import runtime_store
+    console.print(runtime_store.list_decisions(run_id))
+
+
+@app.command("resolve-decision")
+def resolve_decision(request_id: str, choice: str, revision: int = 1,
+                     actor: str = "local_user"):
+    from pactflow.core.process import process_manager
+    try:
+        console.print(process_manager.resolve_decision(request_id, revision, actor, choice))
+    except ValueError as error:
+        console.print(str(error))
+        raise typer.Exit(1)
+
+
 def main():
     app()
 

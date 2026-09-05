@@ -63,6 +63,7 @@ def generate_contract_report(
     thread_id: str = "local_geek_master",
     run_id: str | None = None,
     store=runtime_store,
+    persist: bool = True,
 ) -> dict[str, Any]:
     if run_id:
         events = store.get_run_events(run_id)
@@ -125,6 +126,13 @@ def generate_contract_report(
         report_status = "inconclusive"
     else:
         report_status = "passed" if overall_passed else "failed"
+    if run_id:
+        latest_results = {}
+        for event in events:
+            if event.get("event") in {"tool_succeeded", "tool_failed"}:
+                latest_results[(event.get("tool"), event.get("resource"))] = event
+        if any(event["event"] == "tool_failed" for event in latest_results.values()) and not confirmations:
+            report_status = "failed"
     report = {
         "contract_id": contract.id,
         "contract_hash": compute_contract_hash(contract),
@@ -144,7 +152,8 @@ def generate_contract_report(
         },
         "acceptance_results": acceptance_results,
     }
-    write_report(contract.id, report, run_id=run_id)
+    if persist:
+        write_report(contract.id, report, run_id=run_id)
     audit_logger.log_event(
         thread_id=thread_id,
         event="contract_acceptance",

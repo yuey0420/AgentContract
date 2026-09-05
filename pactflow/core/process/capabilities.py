@@ -45,5 +45,11 @@ def assess_contract_capabilities(contract: TaskContract) -> dict[str, Any]:
         "effective": effective,
         "enforcement": enforcement,
         "policy_version": contract.policy_version,
+        "matcher_version": "legacy_fnmatch_v1",
+        "assessment_source": "contract_declaration",
+        "environment": {"os_isolation": "unavailable", "network_isolation": "unavailable",
+                        "container": "unknown", "guarantee": "advisory",
+                        "filesystem_baseline": "detective", "tool_gateway": "preventive"},
+        "limitations": ["Command arguments and cwd do not isolate scripts or network access.",
+                        "Shell indirect writes are not covered by file-count limits."],
     }
-

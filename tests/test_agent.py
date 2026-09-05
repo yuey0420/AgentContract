@@ -130,7 +130,9 @@ class TestAgent(unittest.TestCase):
             "execution_mode": "chat",
             "process_phase": "execute",
         }
-        mock_process_manager.finalize.return_value = {"status": "passed"}
+        mock_process_manager.evaluate_run.return_value = {"status": "passed"}
+        mock_process_manager.next_after_verification.return_value = "finalize"
+        mock_process_manager.finalize.return_value = {"status": "passed", "terminal_result": "succeeded"}
 
         app = create_agent_app(tools=[])
         result = app.invoke(
@@ -139,7 +141,8 @@ class TestAgent(unittest.TestCase):
         )
 
         mock_process_manager.start.assert_called_once_with("thread-1", "hello")
-        mock_process_manager.finalize.assert_called_once_with("run-1", "thread-1")
+        mock_process_manager.evaluate_run.assert_called_once_with("run-1", "thread-1")
+        mock_process_manager.finalize.assert_called_once_with("run-1", "thread-1", {"status": "passed"})
         self.assertEqual(result["process_report"]["status"], "passed")
 
 

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import RUNTIME_DB_PATH, TASKS_FILE
+from .process_storage import ProcessStorage
 
 
 def _utc_now() -> str:
@@ -27,7 +28,7 @@ def _safe_action_args(args: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
-class RuntimeStore:
+class RuntimeStore(ProcessStorage):
     """Transactional store for scheduled work, approvals, runs, and evidence."""
 
     def __init__(self, db_path: str = RUNTIME_DB_PATH, legacy_tasks_file: str | None = TASKS_FILE):
@@ -35,6 +36,7 @@ class RuntimeStore:
         self.legacy_tasks_file = legacy_tasks_file
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         self._initialize()
+        self.initialize_process_storage()
         if legacy_tasks_file:
             self.migrate_legacy_tasks(legacy_tasks_file)
 
@@ -552,27 +554,30 @@ class RuntimeStore:
             return None
 
     def create_task_nodes(self, run_id: str, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from .process.task_planner import validate_task_graph
+        validate_task_graph(nodes)
+        mapping = {str(node["node_id"]): run_id + ":" + str(node["node_id"]) for node in nodes}
         now = _utc_now()
         with self._connect() as conn:
             for node in nodes:
                 conn.execute(
                     """
-                    INSERT OR REPLACE INTO task_nodes
+                    INSERT INTO task_nodes
                     (node_id, run_id, parent_node_id, title, objective, sequence,
                      depends_on_json, acceptance_json, status, input_json, output_json,
-                     error, started_at, completed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     error, started_at, completed_at, logical_node_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(node["node_id"]), run_id, node.get("parent_node_id"),
+                        mapping[str(node["node_id"])], run_id, mapping.get(node.get("parent_node_id")),
                         str(node.get("title") or node.get("objective") or "task"),
                         str(node.get("objective") or ""), int(node.get("sequence", 0)),
-                        json.dumps(node.get("depends_on") or [], ensure_ascii=False),
+                        json.dumps([mapping[d] for d in node.get("depends_on") or []], ensure_ascii=False),
                         json.dumps(node.get("acceptance") or [], ensure_ascii=False, default=str),
                         str(node.get("status") or "pending"),
                         json.dumps(node.get("input") or {}, ensure_ascii=False, default=str),
                         json.dumps(node.get("output") or {}, ensure_ascii=False, default=str),
-                        node.get("error"), node.get("started_at"), node.get("completed_at"),
+                        node.get("error"), node.get("started_at"), node.get("completed_at"), str(node["node_id"]),
                     ),
                 )
         return self.list_task_nodes(run_id)
@@ -1025,23 +1030,29 @@ class RuntimeStore:
         approved_by: str,
         ttl_minutes: int = 15,
         max_uses: int = 20,
+        source_action_id: str | None = None,
     ) -> dict[str, Any]:
         grant_id = uuid.uuid4().hex[:12]
         created = datetime.now(timezone.utc)
         expires = created + timedelta(minutes=ttl_minutes)
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if source_action_id:
+                existing = conn.execute("SELECT * FROM approval_grants WHERE source_action_id=?", (source_action_id,)).fetchone()
+                if existing:
+                    return dict(existing)
             conn.execute(
                 """
                 INSERT INTO approval_grants
                 (grant_id, run_id, thread_id, contract_hash, tool_name, capability,
-                 resource_pattern, max_uses, uses, created_at, expires_at, approved_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                 resource_pattern, max_uses, uses, created_at, expires_at, approved_by, source_action_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
                 """,
                 (
                     grant_id, run_id, thread_id, contract_hash, tool_name, capability,
                     resource_pattern, max(1, max_uses),
                     created.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    expires.strftime("%Y-%m-%dT%H:%M:%SZ"), approved_by,
+                    expires.strftime("%Y-%m-%dT%H:%M:%SZ"), approved_by, source_action_id,
                 ),
             )
             conn.execute(

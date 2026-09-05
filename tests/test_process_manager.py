@@ -105,7 +105,8 @@ class TestProcessManager(unittest.TestCase):
 
         self.assertEqual(state["execution_mode"], "managed_task")
         self.assertEqual(len(nodes), 4)
-        self.assertEqual(state["task_plan"][1]["node_id"], "planned-task.1")
+        self.assertEqual(state["task_plan"][1]["logical_node_id"], "planned-task.1")
+        self.assertEqual(state["task_plan"][1]["node_id"], state["run_id"] + ":planned-task.1")
         self.assertEqual(state["effective_policy"]["policy_version"], "1.0")
 
     @patch("pactflow.core.process.manager.load_active_contract")

@@ -2,6 +2,10 @@ import os
 import shlex
 import shutil
 import subprocess
+import hashlib
+import tempfile
+from datetime import datetime, timezone
+from threading import RLock
 from pathlib import Path
 from .base import pactflow_tool
 from ..config import OFFICE_DIR
@@ -10,6 +14,15 @@ import re
 import platform
 
 SYS_OS = platform.system()
+_write_lock = RLock()
+
+
+def _execution_result(command, exit_code=None, stdout="", stderr="", *, status=None):
+    return {"schema_version": "execution/1", "command": command,
+            "status": status or ("succeeded" if exit_code == 0 else "failed"),
+            "exit_code": exit_code, "stdout": stdout[-16000:], "stderr": stderr[-16000:],
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "environment_id": "local-host", "coverage_gaps": ["no_os_or_network_isolation"]}
 
 def _get_safe_path(relative_path: str) -> str:
     """
@@ -184,7 +197,7 @@ def write_office_file(filepath: str, content: str, mode: str = "w") -> str:
     
 
 @pactflow_tool
-def execute_office_shell(command: str) -> str:
+def execute_office_shell(command: str) -> dict:
     """
     在 office 工位中执行 Shell 命令。
     
@@ -202,11 +215,11 @@ def execute_office_shell(command: str) -> str:
             sub_dir = argv[1] if len(argv) > 1 else ""
             target = _get_safe_path(sub_dir)
             if not os.path.isdir(target):
-                return f"❌ 执行异常：目录不存在：{sub_dir}"
+                return _execution_result(command, stderr=f"目录不存在：{sub_dir}")
             listing = "\n".join(sorted(os.listdir(target))) or "(空目录)"
-            return f" ● 当前系统: {SYS_OS}\n ● 执行命令: `{command}`\n ● 退出码 (Exit Code): 0\n[STDOUT]\n{listing}"
+            return _execution_result(command, 0, listing)
         if argv[0] == "echo":
-            return f" ● 当前系统: {SYS_OS}\n ● 执行命令: `{command}`\n ● 退出码 (Exit Code): 0\n[STDOUT]\n{' '.join(argv[1:])}"
+            return _execution_result(command, 0, ' '.join(argv[1:]))
 
         result = subprocess.run(
             argv,
@@ -219,33 +232,66 @@ def execute_office_shell(command: str) -> str:
             timeout=current_execution.get().shell_timeout
         )
         
-        output = f" ● 当前系统: {SYS_OS}\n"
-        output += f" ● 执行命令: `{command}`\n"
-        output += f" ● 退出码 (Exit Code): {result.returncode}\n"
-        
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-        
-        if result.returncode != 0 and ("prompt" in stderr.lower() or "y/n" in stdout.lower()):
-            output += "\n💡 系统提示：命令可能由于交互式等待而失败。请重试并添加 -y 参数！"
-        
-        if stdout:
-            output += f"\n[STDOUT]\n{stdout[-2000:] if len(stdout) > 2000 else stdout}"
-        if stderr:
-            output += f"\n[STDERR]\n{stderr[-2000:] if len(stderr) > 2000 else stderr}"
-            
-        if not stdout and not stderr:
-            if result.returncode == 0:
-                output += "\n(静默执行完毕：无终端输出)"
-            else:
-                output += "\n(异常退出：Exit Code 非 0，无错误日志输出)"
-            
-        return output
+        return _execution_result(command, result.returncode, result.stdout, result.stderr)
         
     except subprocess.TimeoutExpired:
         timeout = current_execution.get().shell_timeout
-        return f"❌ 严重错误：命令执行超时（{timeout}s）被熔断！请检查是否有阻塞式交互。"
+        return _execution_result(command, stderr=f"命令执行超时（{timeout}s）", status="outcome_unknown")
     except (PermissionError, ValueError, FileNotFoundError) as e:
-        return f"❌ 权限拒绝：{str(e)}"
+        return _execution_result(command, stderr=f"权限拒绝：{e}")
     except Exception as e:
-        return f"❌ 执行异常：{str(e)}"
+        return _execution_result(command, stderr=f"执行异常：{e}", status="outcome_unknown")
+
+
+@pactflow_tool
+def patch_office_file(filepath: str, expected_content_hash: str, content: str) -> dict:
+    """Replace an office file only when its SHA256 still matches the expected version."""
+    try:
+        target = Path(_get_safe_path(filepath))
+        with _write_lock:
+            original = target.read_bytes()
+            actual = hashlib.sha256(original).hexdigest()
+            if actual != expected_content_hash.removeprefix("sha256:"):
+                return {"status": "failed", "reason": "content_conflict", "actual_hash": actual,
+                        "expected_hash": expected_content_hash, "path": filepath}
+            fd, temporary = tempfile.mkstemp(prefix=".patch-", dir=target.parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(content.encode("utf-8"))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if hashlib.sha256(target.read_bytes()).hexdigest() != actual:
+                    return {"status": "failed", "reason": "content_conflict", "path": filepath}
+                os.replace(temporary, target)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+        return {"status": "succeeded", "path": filepath, "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest()}
+    except (OSError, ValueError) as error:
+        return {"status": "failed", "reason": str(error)}
+
+
+@pactflow_tool
+def run_office_check(check_id: str) -> dict:
+    """Run a fixed check from the current approved contract's check registry."""
+    from ..process.evidence import capture_filesystem_snapshot, snapshot_fingerprint
+    definition = (current_execution.get().checks or {}).get(check_id)
+    if not definition or not isinstance(definition.get("argv"), list) or not definition["argv"]:
+        return {"status": "failed", "reason": "unknown_check", "check_id": check_id}
+    try:
+        cwd = _get_safe_path(definition.get("cwd", ""))
+        argv = definition["argv"]
+        if any(not isinstance(arg, str) for arg in argv):
+            raise ValueError("check argv must contain strings")
+        result = subprocess.run(argv, cwd=cwd, shell=False, env=_restricted_environment(),
+                                capture_output=True, encoding="utf-8", errors="replace",
+                                timeout=min(int(definition.get("timeout", 60)), current_execution.get().shell_timeout))
+        output = _execution_result(check_id, result.returncode, result.stdout, result.stderr)
+        snapshot = capture_filesystem_snapshot(OFFICE_DIR)
+        output.update({"check_id": check_id, "checker_version": definition.get("version", "1"),
+                       "workspace_revision": snapshot_fingerprint(snapshot), "coverage": snapshot["coverage"]})
+        return output
+    except subprocess.TimeoutExpired:
+        return _execution_result(check_id, stderr="Check timed out", status="outcome_unknown")
+    except (OSError, ValueError) as error:
+        return _execution_result(check_id, stderr=str(error))

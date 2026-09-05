@@ -114,8 +114,10 @@ class TestSandboxTools(unittest.TestCase):
 
         result = execute_office_shell.invoke({"command": "ls"})
         # 输出格式包含前缀空格和中文冒号 - 使用更宽松的匹配
-        self.assertIn("ls", result)
-        self.assertIn("command output", result)
+        self.assertEqual(result["command"], "ls")
+        self.assertEqual(result["stdout"], "command output")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["status"], "succeeded")
 
     def test_execute_office_shell_dangerous_commands(self):
         """测试执行危险命令会被拦截"""
@@ -130,7 +132,8 @@ class TestSandboxTools(unittest.TestCase):
         for cmd in dangerous_commands:
             with self.subTest(cmd=cmd):
                 result = execute_office_shell.invoke({"command": cmd})
-                self.assertIn("❌ 权限拒绝", result)
+                self.assertEqual(result["status"], "failed")
+                self.assertIn("权限拒绝", result["stderr"])
 
 
 if __name__ == '__main__':

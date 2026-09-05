@@ -110,9 +110,10 @@ class ProcessE2ETestCase(unittest.TestCase):
         self.assertEqual(state["process_report"]["status"], "passed")
         events = self.store.get_run_events(state["run_id"])
         self.assertIn("tool_succeeded", [event["event"] for event in events])
-        self.assertEqual(events[-1]["event"], "run_verified")
+        self.assertEqual(events[-1]["event"], "delivery.ready")
+        self.assertEqual(state["process_report"]["delivery"]["human_acceptance"], "pending")
 
-    def test_managed_subtasks_are_completed_in_order(self):
+    def test_model_text_without_node_ac_does_not_complete_subtasks(self):
         provider = _provider_with_responses(
             AIMessage(content="first step complete"),
             AIMessage(content="second step complete"),
@@ -143,12 +144,12 @@ class ProcessE2ETestCase(unittest.TestCase):
                 config={"configurable": {"thread_id": "subtask-thread"}},
             )
 
-        self.assertEqual(state["process_report"]["status"], "passed")
+        self.assertEqual(state["process_report"]["status"], "inconclusive")
         child_nodes = [node for node in self.store.list_task_nodes(state["run_id"]) if node["parent_node_id"]]
-        self.assertEqual([node["status"] for node in child_nodes], ["completed", "completed"])
+        self.assertEqual([node["status"] for node in child_nodes], ["waiting", "pending"])
         self.assertEqual(
             [event["event"] for event in self.store.get_run_events(state["run_id"])].count("task_completed"),
-            2,
+            0,
         )
 
     def test_forbidden_resource_is_not_written_and_fails_acceptance(self):

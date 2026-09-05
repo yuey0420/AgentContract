@@ -67,7 +67,7 @@ class TestContractToolNode(unittest.TestCase):
         mock_guard.return_value = ContractDecision(
             decision="require_confirmation",
             contract_id="contract-1",
-            contract_hash="sha256:test",
+            contract_hash=None,
             reason="confirm",
         )
         with patch("pactflow.core.contracts.tool_node.runtime_store", self.store):
@@ -210,10 +210,10 @@ class TestContractToolNode(unittest.TestCase):
             "id": "call-scope", "type": "tool_call",
         }])]
         with patch("pactflow.core.contracts.tool_node.runtime_store", self.store), \
-             patch("pactflow.core.contracts.tool_node.interrupt") as mock_interrupt:
-            result = self.node(self.state, self.config)
-        mock_interrupt.assert_not_called()
-        self.assertEqual(result["messages"][0].content, "ok:y")
+             patch("pactflow.core.contracts.tool_node.interrupt", side_effect=RuntimeError("paused")):
+            with self.assertRaisesRegex(RuntimeError, "paused"):
+                self.node(self.state, self.config)
+        self.assertEqual(self.store.list_approval_grants(self.run_id)[-1]["uses"], 0)
 
     def test_critical_action_cannot_create_scope(self):
         action_id = self.store.create_pending_action(

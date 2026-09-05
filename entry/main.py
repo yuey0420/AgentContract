@@ -158,11 +158,16 @@ async def async_main():
             for task in getattr(snapshot, "tasks", ()):
                 for interrupt_item in getattr(task, "interrupts", ()):
                     value = getattr(interrupt_item, "value", None)
-                    if isinstance(value, dict) and value.get("type") == "approval_required":
+                    if isinstance(value, dict) and value.get("type") in {"approval_required", "product_choice"}:
                         return value
             return None
 
         def render_approval(approval, *, restored=False):
+            if approval.get("type") == "product_choice":
+                cprint("产品选择：" + approval["question"])
+                for option in approval["options"]:
+                    cprint(f"  {option['id']}  {option['label']}")
+                return
             arguments = json.dumps(approval.get("arguments", {}), ensure_ascii=False, indent=2)
             title = "已恢复待审批操作" if restored else "高风险操作需要审批"
             cprint(f"  \033[38;5;214m┌─ {title} ─────────────\033[0m")
@@ -172,6 +177,8 @@ async def async_main():
             cprint(f"  \033[38;5;250m│ 条款：{approval.get('clause') or 'runtime approval'}\033[0m")
             cprint(f"  \033[38;5;250m│ 原因：{approval.get('reason')}\033[0m")
             cprint(f"  \033[38;5;250m│ 有效期至：{approval.get('expires_at')}\033[0m")
+            if approval.get("scope"):
+                cprint("  范围授权：" + json.dumps(approval["scope"], ensure_ascii=False))
             options = approval.get("approval_options") or ["once", "reject"]
             prompt = "Y=批准一次 / A=本次运行批准同类动作 / N=拒绝" if "run_scope" in options else "Y=批准一次 / N=拒绝"
             cprint(f"  \033[38;5;214m└─ {prompt} ───────────\033[0m")
@@ -200,7 +207,8 @@ async def async_main():
             render_approval(approval, restored=restored)
             if approval_timeout_task:
                 approval_timeout_task.cancel()
-            approval_timeout_task = asyncio.create_task(expire_and_resume(approval))
+            if approval.get("expires_at"):
+                approval_timeout_task = asyncio.create_task(expire_and_resume(approval))
 
 
         def get_bottom_toolbar():
@@ -283,9 +291,16 @@ async def async_main():
                             elif node_name == "verify":
                                 report = node_data.get("process_report", {})
                                 status = report.get("status")
-                                if status in {"failed", "inconclusive"}:
+                                if status in {"failed", "inconclusive"} and node_data.get("verification_route") != "agent":
                                     cprint(f"  \033[38;5;214m✦ 流程验收状态：{status}，请查看契约报告。\033[0m")
                                 spinner.is_tool_calling = False
+                            elif node_name == "finalize":
+                                report = node_data.get("process_report", {})
+                                delivery = report.get("delivery", {})
+                                cprint(f"  交付：技术 {delivery.get('technical_status')}，场景 {delivery.get('scenario_status')}，人工接受 {delivery.get('human_acceptance')}")
+                                cprint(f"  Run: {report.get('run_id')}  WorkItem: {report.get('work_item_id')}")
+                                for limitation in delivery.get("limitations", []):
+                                    cprint("  限制：" + limitation)
                             elif node_name != "agent":
                                 spinner.is_tool_calling = False
 
@@ -336,9 +351,29 @@ async def async_main():
 
                     if spinner.pending_approval:
                         approval = spinner.pending_approval
+                        if approval.get("type") == "product_choice":
+                            from pactflow.core.process.manager import ProcessManager
+                            manager = ProcessManager(runtime_store)
+                            if user_input not in {option["id"] for option in approval["options"]}:
+                                cprint(json.dumps(manager.handle_control(approval["run_id"], user_input), ensure_ascii=False, default=str))
+                                continue
+                            manager.resolve_decision(approval["request_id"], approval["revision"], "local_user", user_input)
+                            spinner.pending_approval = None
+                            await task_queue.put(Command(resume={"request_id": approval["request_id"]}))
+                            continue
                         action_id = approval["action_id"]
                         service = ApprovalService(runtime_store)
                         normalized = user_input.lower()
+                        if normalized not in {"y", "yes", "a", "all", "scope", "n", "no"}:
+                            from pactflow.core.process.manager import ProcessManager
+                            pending = runtime_store.get_action(action_id)
+                            response = ProcessManager(runtime_store).handle_control(pending["run_id"], user_input)
+                            cprint(json.dumps(response, ensure_ascii=False, default=str))
+                            if response["kind"] == "cancel":
+                                spinner.pending_approval = None
+                                if approval_timeout_task:
+                                    approval_timeout_task.cancel()
+                            continue
                         if normalized in {"y", "yes"}:
                             result = service.approve(action_id, "local_user")
                             label = (
@@ -378,6 +413,15 @@ async def async_main():
                     if user_input.lower().startswith("/approve "):
                         cprint("  \033[31m当前版本使用内联 Y/N 审批，无需手输审批编号。\033[0m")
                         continue
+                    if user_input.lower() in {"/status", "status", "状态", "查看状态", "进度", "/cancel", "取消", "/pause", "暂停"}:
+                        from pactflow.core.process.manager import ProcessManager
+                        snapshot = await app.aget_state(config)
+                        active_run = snapshot.values.get("run_id") if snapshot else None
+                        if active_run:
+                            cprint(json.dumps(ProcessManager(runtime_store).handle_control(active_run, user_input), ensure_ascii=False, default=str))
+                        else:
+                            cprint("当前没有运行。")
+                        continue
                     
 
                     padded_bubble = f"  ❯ {user_input}    "
@@ -404,6 +448,15 @@ async def async_main():
             checkpoint_approval = find_checkpoint_approval(
                 await asyncio.to_thread(app.get_state, config)
             )
+            if checkpoint_approval:
+                if checkpoint_approval.get("type") == "product_choice":
+                    decisions = runtime_store.list_decisions(checkpoint_approval["run_id"])
+                    decision = next(item for item in decisions if item["request_id"] == checkpoint_approval["request_id"])
+                    if decision["status"] == "resolved":
+                        await task_queue.put(Command(resume={"request_id": decision["request_id"]}))
+                    else:
+                        set_pending_approval(checkpoint_approval, restored=True)
+                    checkpoint_approval = None
             if checkpoint_approval:
                 stored = ApprovalService(runtime_store).get(checkpoint_approval["action_id"])
                 if stored.status == "pending":

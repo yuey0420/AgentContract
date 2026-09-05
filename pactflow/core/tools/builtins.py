@@ -10,7 +10,9 @@ from .sandbox_tools import (
     list_office_files,
     read_office_file,
     write_office_file,
-    execute_office_shell
+    execute_office_shell,
+    patch_office_file,
+    run_office_check,
 )
 
 
@@ -278,6 +280,8 @@ BUILTIN_TOOLS = [
     write_office_file,
     execute_office_shell,
     get_system_model_info,
+    patch_office_file,
+    run_office_check,
     schedule_task,
     list_scheduled_tasks,
     delete_scheduled_task,

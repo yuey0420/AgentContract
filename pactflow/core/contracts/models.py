@@ -92,3 +92,4 @@ class ContractDecision(ContractModel):
     reason: str = ""
     risk_level: Optional[RiskLevel] = None
     contract_hash: Optional[str] = None
+    matched_clauses: list[str] = Field(default_factory=list)

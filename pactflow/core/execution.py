@@ -7,6 +7,7 @@ class ExecutionContext:
     thread_id: str = "system_default"
     run_id: str | None = None
     shell_timeout: int = 60
+    checks: dict | None = None
 
 
 current_execution: ContextVar[ExecutionContext] = ContextVar(

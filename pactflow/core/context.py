@@ -11,6 +11,11 @@ class AgentState(TypedDict, total=False):
 
     # 每次用户请求对应一个独立运行，避免跨轮次混用验收证据。
     run_id: str
+    work_item_id: str
+    run_status: str
+    terminal_result: str | None
+    verification_route: str
+    verification_feedback: list[dict]
     execution_mode: str
     process_phase: str
     lifecycle_status: str

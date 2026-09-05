@@ -10,11 +10,13 @@
 
 核心创新：把 Agent 的高风险工具调用从“提示词约束”升级为“结构化契约校验”，让执行前有边界、执行中可拦截、执行后可验收。
 
-Python 3.10+ · LangGraph / LangChain · MIT License · 本地回归测试 132 项通过
+Python 3.10+ · LangGraph / LangChain · MIT License
 
 [快速开始](#-快速开始) · [核心能力](#-核心能力) · [契约层-demo](#-契约层-demo) · [架构图](#-系统架构)
 
 </div>
+
+流程层 V3 已接入 Python 运行时，新增执行账本、场景验证与自动返工、产品决策和独立交付状态。使用方式、回归入口和未完成边界见 [V3 实现说明](docs/PACTFLOW_PROCESS_V3_IMPLEMENTATION.md)。
 
 ---
 

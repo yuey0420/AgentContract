@@ -104,10 +104,10 @@ def validate_model_plan(
         node_id = str(raw.get("id") or f"{task_id}.{index}")
         if node_id in seen or node_id == task_id:
             raise ValueError("planner produced duplicate task ids")
-        seen.add(node_id)
         dependencies = raw.get("depends_on") or []
         if not isinstance(dependencies, list) or any(str(item) not in seen for item in dependencies):
             raise ValueError("planner dependencies must reference earlier tasks")
+        seen.add(node_id)
         nodes.append({
             "node_id": node_id,
             "parent_node_id": task_id,
@@ -120,6 +120,37 @@ def validate_model_plan(
             "depth": 1,
         })
     return nodes
+
+
+def validate_task_graph(nodes: list[dict[str, Any]]) -> None:
+    ids = [str(node["node_id"]) for node in nodes]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate task node ids")
+    graph = {str(node["node_id"]): list(node.get("depends_on") or []) for node in nodes}
+    for node in nodes:
+        parent = node.get("parent_node_id")
+        if parent:
+            if parent not in graph or parent == node["node_id"]:
+                raise ValueError("invalid parent task")
+            # A parent cannot finish until its children finish.
+            graph[parent].append(node["node_id"])
+    visiting, visited = set(), set()
+
+    def visit(node_id):
+        if node_id not in graph:
+            raise ValueError("dangling task dependency")
+        if node_id in visiting:
+            raise ValueError("cyclic task dependency")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        for dependency in graph[node_id]:
+            visit(dependency)
+        visiting.remove(node_id)
+        visited.add(node_id)
+
+    for node_id in graph:
+        visit(node_id)
 
 
 def model_decompose_objective(

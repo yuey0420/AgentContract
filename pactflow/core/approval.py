@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import PurePosixPath
 from typing import Any
 
 from .logger import audit_logger
@@ -93,6 +92,7 @@ class ApprovalService:
             approved_by=actor,
             ttl_minutes=15,
             max_uses=5 if profile == "audited" else 20,
+            source_action_id=action_id,
         )
         return result
 
@@ -127,23 +127,17 @@ class ApprovalService:
         return bool(
             action.get("contract_hash")
             and profile in {"development", "audited"}
-            and risk != "critical"
-            and capability != "external"
+            and risk in {"low", "medium"}
+            and capability in {"read", "write"}
+            and str(action.get("tool_name", "")) in {"read_office_file", "list_office_files", "write_office_file", "patch_office_file"}
             and effect not in {"destructive", "external"}
-            and clause not in {"scope.human_only", "security.critical_action"}
+            and clause in {"scope.review_required", "tool_policy.require_confirmation_for"}
         )
 
     @staticmethod
     def _resource_pattern(resource: str, profile: str) -> str:
-        normalized = resource.replace("\\", "/")
-        if profile == "audited" or not normalized:
-            return normalized
-        if "/" in normalized and not normalized.startswith(("http://", "https://")):
-            parent = str(PurePosixPath(normalized).parent)
-            return f"{parent}/**" if parent not in {"", "."} else "*"
-        if " " in normalized:
-            return normalized.split(" ", 1)[0] + " *"
-        return normalized
+        # Literal resource only; no implicit directory or interpreter expansion.
+        return resource.replace("\\", "/")
 
     def approve(self, action_id: str, actor: str = "local_user") -> ApprovalResult:
         changed = self.store.approve_pending_action(action_id, actor)
@@ -177,7 +171,10 @@ class ApprovalService:
         )
         action = self.store.get_action(action_id)
         self._audit(action, "approval_consumed" if consumed else "approval_consume_failed", None)
-        return ApprovalResult(action_id, action["status"] if action else "missing", action)
+        status = action["status"] if action else "missing"
+        if not consumed and status == "consumed":
+            status = "already_consumed"
+        return ApprovalResult(action_id, status, action)
 
     def get(self, action_id: str) -> ApprovalResult:
         action = self.store.get_action(action_id)
