@@ -395,6 +395,28 @@ class TestProcessV3(unittest.TestCase):
         service.approve_scope(action, "tester")
         self.assertEqual(len(self.store.list_approval_grants(run)), 1)
 
+    def test_scoped_approval_resume_consumes_original_action_and_finishes(self):
+        self.contract.scope.review_required = ["**"]
+        self.resign()
+        provider = Mock()
+        provider.bind_tools.return_value.invoke.side_effect = [
+            AIMessage(content="", tool_calls=[call("write_office_file", {"filepath": "a.txt", "content": "first"}, "first")]),
+            AIMessage(content="", tool_calls=[call("write_office_file", {"filepath": "a.txt", "content": "second"}, "second")]),
+            AIMessage(content="ready"),
+        ]
+        with patch("pactflow.core.agent.get_provider", return_value=provider):
+            app = create_agent_app(tools=[write_office_file], checkpointer=MemorySaver())
+            paused = app.invoke({"messages": [HumanMessage(content="write file")]}, self.config)
+            request = paused["__interrupt__"][0].value
+            ApprovalService(self.store).approve_scope(request["action_id"], "tester")
+            final = app.invoke(Command(resume={"action_id": request["action_id"]}), self.config)
+        self.assertEqual(final["process_report"]["status"], "passed")
+        self.assertEqual(self.store.get_action(request["action_id"])["status"], "consumed")
+        self.assertEqual(final["process_report"]["summary"]["pending_approvals"], 0)
+        self.assertEqual(final["process_report"]["summary"]["approval_prompts"], 1)
+        self.assertEqual(final["process_report"]["summary"]["approval_grant_reuses"], 1)
+        self.assertEqual((self.office / "a.txt").read_text(), "second")
+
     def test_cli_commands_and_draft_example_are_valid(self):
         from typer.testing import CliRunner
         from entry.cli import app

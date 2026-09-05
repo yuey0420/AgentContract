@@ -273,7 +273,11 @@ class ContractToolNode:
 
             if decision.decision == "require_confirmation" and run_id:
                 grant = None
-                if self._scope_eligible(
+                # A resumed exact approval must consume its own action before any
+                # newly created scope grant can authorize subsequent calls.
+                existing_action = next((action for action in runtime_store.list_run_actions(run_id)
+                                        if action.get("tool_call_id") == tool_call_id), None)
+                if existing_action is None and self._scope_eligible(
                     decision, instruction, process_profile, effect
                 ):
                     from ..process_storage import now
